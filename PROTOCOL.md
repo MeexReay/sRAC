@@ -1,0 +1,71 @@
+# RAC Protocol
+
+Default port - 42666
+
+All the packets are serverbound and socket closes after processing them
+
+## Sending messages
+
+Client sends:
+
+- Byte `0x01`
+- Message text
+
+## Reading messages
+
+Client sends:
+
+- Byte `0x01`
+
+Server sends:
+
+- Size of all messages in ASCII (data_size)
+
+### Normal reading
+
+Client sends:
+
+- Byte `0x01`
+
+Server sends:
+
+- All messages
+
+### Chunked reading
+
+Client sends:
+
+- Byte `0x02`
+- Size of messages you have in ASCII (last_size)
+
+Server sends:
+
+- All new messages
+
+*for example: if you want to read last N bytes, last_size = data_size - N*
+
+## Registration users
+
+Client sends:
+
+- Byte `0x03`
+- Username
+- `\n`
+- Password
+
+Server sends:
+
+- `0x00` if successful or `0x01` if the username is already taken
+
+*legacy servers send nothing on successful registration*
+
+## Sending authorized messages
+
+Client sends:
+
+- Byte `0x02`
+- Username
+- `\n`
+- Password
+- `\n`
+- Message
