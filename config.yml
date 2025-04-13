@@ -1,0 +1,4 @@
+host: 127.0.0.1:42666
+
+threadpool: 10
+timeout: 5 # in seconds
