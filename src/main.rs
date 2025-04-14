@@ -1,4 +1,4 @@
-use std::{error::Error, io::{Read, Write}, net::{IpAddr, TcpListener, TcpStream}, sync::{Arc, RwLock}, thread};
+use std::{error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Write}, net::{IpAddr, TcpListener, TcpStream}, sync::{Arc, RwLock}, thread};
 
 use bRAC::{chat::format_message, util::sanitize_text};
 use chrono::{DateTime, Local, TimeZone};
@@ -11,15 +11,16 @@ use clap::Parser;
 #[derive(Clone)]
 pub struct Account {
     name: String,
-    pass: String,
-    salt: String
+    pass: Vec<u8>,
+    salt: String,
+    addr: String,
+    date: i64
 }
 
-fn password_hash(name: &str, pass: &str, salt: &str) -> String {
+fn password_hash(name: &str, pass: &str, salt: &str) -> Vec<u8> {
     let mut hasher = Md5::new();
     hasher.update(format!("{name}{pass}{salt}").as_bytes());
-    let result = hasher.finalize().to_vec();
-    String::from_utf8_lossy(&result).to_string()
+    hasher.finalize().to_vec()
 }
 
 fn password_salt() -> String {
@@ -31,13 +32,15 @@ fn password_salt() -> String {
 }
 
 impl Account {
-    pub fn new(name: String, password: String) -> Self {
+    pub fn new(name: String, password: String, addr: String, date: i64) -> Self {
         let salt = password_salt();
 
         Account {
             pass: password_hash(&name, &password, &salt),
             name: name.clone(),
-            salt: salt.clone()
+            salt: salt.clone(),
+            addr,
+            date
         }
     }
 
@@ -47,6 +50,75 @@ impl Account {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn addr(&self) -> &str {
+        &self.addr
+    }
+
+    pub fn date(&self) -> i64 {
+        self.date
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.append(&mut (self.name.len() as u32).to_le_bytes().to_vec());
+        data.append(&mut (self.salt.len() as u32).to_le_bytes().to_vec());
+        data.append(&mut (self.addr.len() as u32).to_le_bytes().to_vec());
+        data.append(&mut (self.pass.len() as u32).to_le_bytes().to_vec());
+        data.append(&mut self.name.as_bytes().to_vec());
+        data.append(&mut self.salt.as_bytes().to_vec());
+        data.append(&mut self.addr.as_bytes().to_vec());
+        data.append(&mut self.pass.clone());
+        data.append(&mut self.date.to_le_bytes().to_vec());
+        data
+    }
+
+    pub fn from_bytes(text: Vec<u8>) -> Self {
+        let mut text = Cursor::new(text);
+
+        let mut name_len = [0; 4];
+        text.read_exact(&mut name_len).unwrap();
+        let name_len = u32::from_le_bytes(name_len) as usize;
+
+        let mut salt_len = [0; 4];
+        text.read_exact(&mut salt_len).unwrap();
+        let salt_len = u32::from_le_bytes(salt_len) as usize;
+
+        let mut addr_len = [0; 4];
+        text.read_exact(&mut addr_len).unwrap();
+        let addr_len = u32::from_le_bytes(addr_len) as usize;
+
+        let mut pass_len = [0; 4];
+        text.read_exact(&mut pass_len).unwrap();
+        let pass_len = u32::from_le_bytes(pass_len) as usize;
+
+        let mut name = vec![0; name_len];
+        text.read_exact(&mut name).unwrap();
+        let name = String::from_utf8_lossy(&name).to_string();
+
+        let mut salt = vec![0; salt_len];
+        text.read_exact(&mut salt).unwrap();
+        let salt = String::from_utf8_lossy(&salt).to_string();
+
+        let mut addr = vec![0; addr_len];
+        text.read_exact(&mut addr).unwrap();
+        let addr = String::from_utf8_lossy(&addr).to_string();
+
+        let mut pass = vec![0; pass_len];
+        text.read_exact(&mut pass).unwrap();
+
+        let mut date = [0; 8];
+        text.read_exact(&mut date).unwrap();
+        let date = i64::from_le_bytes(date);
+
+        Account {
+            name,
+            salt,
+            pass,
+            addr,
+            date
+        }
     }
 }
 
@@ -68,7 +140,8 @@ fn add_message(
     buf: &mut Vec<u8>, 
     messages: Arc<RwLock<Vec<u8>>>, 
     addr: Option<IpAddr>,
-    sanitize: bool
+    sanitize: bool,
+    messages_file: Option<String>
 ) -> Result<(), Box<dyn Error>> {
     let mut msg = Vec::new();
 
@@ -88,6 +161,17 @@ fn add_message(
     }
 
     msg.push(b'\n');
+
+    if let Some(messages_file) = messages_file {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(messages_file)?;
+
+        file.write_all(&msg)?;
+        file.flush()?;
+    }
 
     messages.write().unwrap().append(&mut msg.clone());
 
@@ -146,7 +230,7 @@ fn accept_stream(
             let size = stream.read(&mut buf)?;
             buf.truncate(size);
     
-            add_message(&mut buf, messages.clone(), Some(stream.peer_addr()?.ip()), args.sanitize)?;
+            add_message(&mut buf, messages.clone(), Some(stream.peer_addr()?.ip()), args.sanitize, args.messages_file.clone())?;
         }
     } else if buf[0] == 0x02 {
         let mut buf = vec![0; 8192];
@@ -164,7 +248,7 @@ fn accept_stream(
         for user in accounts.read().unwrap().iter() {
             if user.name() == name {
                 if user.check_password(password) {
-                    add_message(&mut text.as_bytes().to_vec(), messages.clone(), None, args.sanitize)?;
+                    add_message(&mut text.as_bytes().to_vec(), messages.clone(), None, args.sanitize, args.messages_file.clone())?;
                 } else {
                     stream.write_all(&[0x02])?;
                 }
@@ -185,14 +269,38 @@ fn accept_stream(
         let Some(name) = segments.next() else { return Ok(()) };
         let Some(password) = segments.next() else { return Ok(()) };
 
+        let addr = stream.peer_addr()?.ip().to_string();
+
+        let now: i64 = Local::now().timestamp_millis();
+
         for user in accounts.read().unwrap().iter() {
             if user.name() == name {
                 stream.write_all(&[0x01])?;
                 return Ok(());
             }
+            if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
+                stream.write_all(&[0x01])?;
+                return Ok(());
+            }
         }
+
+        let account = Account::new(name.to_string(), password.to_string(), addr, now);
+
+        if let Some(accounts_file) = args.accounts_file.clone() {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(accounts_file)?;
+    
+            file.write_all(&account.to_bytes())?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+        }
+
+        println!("user registered: {name}");
         
-        accounts.write().unwrap().push(Account::new(name.to_string(), password.to_string()));
+        accounts.write().unwrap().push(account);
     }
 
     Ok(())
@@ -215,7 +323,19 @@ struct Args {
 
     /// Splash message
     #[arg(short='S', long)]
-    splash: Option<String>
+    splash: Option<String>,
+
+    /// Save messages to file
+    #[arg(short='M', long)]
+    messages_file: Option<String>,
+
+    /// Save accounts to file
+    #[arg(short='A', long)]
+    accounts_file: Option<String>,
+
+    /// Register timeout in seconds
+    #[arg(short='r', long, default_value_t = 600)]
+    register_timeout: usize
 }
 
 fn main() {
@@ -223,8 +343,34 @@ fn main() {
 
     let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
 
-    let messages = Arc::new(RwLock::new(Vec::new()));
-    let accounts = Arc::new(RwLock::new(Vec::new()));
+    let messages = Arc::new(RwLock::new(
+        if let Some(messages_file) = args.messages_file.clone() {
+            if fs::exists(&messages_file).expect("error checking messages file") {
+                fs::read(&messages_file).expect("error reading messages file")
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    ));
+
+    let accounts = Arc::new(RwLock::new(
+        if let Some(accounts_file) = args.accounts_file.clone() {
+            if fs::exists(&accounts_file).expect("error checking accounts file") {
+                fs::read(&accounts_file)
+                    .expect("error reading accounts file")
+                    .split(|o| *o == b'\n')
+                    .filter(|o| !o.is_empty())
+                    .map(|o| Account::from_bytes(o.to_vec()))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    ));
 
     println!("Server started on {}", &args.host);
 
