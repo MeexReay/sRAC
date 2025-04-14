@@ -21,3 +21,9 @@ cargo run -- \
   --sanitize \
   --auth-only
 ```
+## Roadmap
+
+- Wrap with SSL
+- Proxy-mode
+- Notifications by ip
+- Server comands
