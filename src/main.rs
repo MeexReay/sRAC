@@ -219,8 +219,6 @@ struct Args {
 }
 
 fn main() {
-    // let mut args = Args::parse();
-    // args.splash = args.splash.map(|o| format!("{o}\n"));
     let args = Arc::new(Args::parse());
 
     let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
