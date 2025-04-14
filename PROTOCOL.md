@@ -55,9 +55,7 @@ Client sends:
 
 Server sends:
 
-- `0x00` if successful or `0x01` if the username is already taken
-
-*legacy servers send nothing on successful registration*
+- `0x01` if the username is already taken
 
 ## Sending authorized messages
 
