@@ -47,8 +47,10 @@ fn accept_stream(mut stream: TcpStream, messages: Arc<RwLock<Vec<u8>>>) -> Resul
         msg.push(b' ');
         msg.append(&mut buf);
 
-        println!("{}", String::from_utf8_lossy(&msg));
-        
+        if let Some(msg) = bRAC::chat::format_message(true, String::from_utf8_lossy(&msg).to_string()) {
+            println!("{}", msg);
+        }
+
         msg.push(b'\n');
 
         messages.write().unwrap().append(&mut msg.clone());
