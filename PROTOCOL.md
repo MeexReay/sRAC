@@ -15,7 +15,7 @@ Client sends:
 
 Client sends:
 
-- Byte `0x01`
+- Byte `0x00`
 
 Server sends:
 
