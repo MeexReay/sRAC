@@ -44,6 +44,17 @@ Server sends:
 
 *for example: if you want to read last N bytes, last_size = data_size - N*
 
+## Sending authorized messages
+
+Client sends:
+
+- Byte `0x02`
+- Username
+- `\n`
+- Password
+- `\n`
+- Message
+
 ## Registration users
 
 Client sends:
@@ -56,14 +67,3 @@ Client sends:
 Server sends:
 
 - `0x01` if the username is already taken
-
-## Sending authorized messages
-
-Client sends:
-
-- Byte `0x02`
-- Username
-- `\n`
-- Password
-- `\n`
-- Message

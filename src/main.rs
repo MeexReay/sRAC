@@ -1,29 +1,62 @@
 use std::{env::args, error::Error, io::{Read, Write}, net::{TcpListener, TcpStream}, sync::{Arc, RwLock}, thread};
 
+use chrono::{DateTime, Local, TimeZone};
+
+fn message_prefix(time_millis: i64, address: &str) -> String {
+    let datetime: DateTime<Local> = Local.timestamp_millis_opt(time_millis).unwrap();
+    format!(
+        "[{}] {{{}}}",
+        datetime.format("%d.%m.%Y %H:%M"),
+        address
+    )
+}
+
 fn accept_stream(mut stream: TcpStream, messages: Arc<RwLock<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
-    let mut buf = vec![0; 4096];
-    let size = stream.read(&mut buf)?;
-    buf.truncate(size);
+    let mut buf = vec![0];
+    stream.read_exact(&mut buf)?;
 
-    if buf[0] == 0x01 && size == 1 {
-        stream.write_all(messages.read().unwrap().len().to_string().as_bytes())?;
+    if buf[0] == 0x00 {
+        let messages = messages.read().unwrap().clone();
 
-        let mut buf = vec![0, 16];
+        stream.write_all(messages.len().to_string().as_bytes())?;
+
+        let mut id = vec![0];
+        stream.read_exact(&mut id)?;
+
+        if id[0] == 0x01 {
+            stream.write_all(&messages)?;
+        } else if id[0] == 0x02 {
+            let mut buf = vec![0; 10];
+            let size = stream.read(&mut buf)?;
+            buf.truncate(size);
+
+            let len: usize = String::from_utf8(buf)?.parse()?;
+            stream.write_all(&messages[len..])?;
+        }
+    } else if buf[0] == 0x01 {
+        let mut buf = vec![0; 4096];
         let size = stream.read(&mut buf)?;
         buf.truncate(size);
 
-        if buf[0] == 0x01 {
-            stream.write_all(&messages.read().unwrap())?;
-        } else if buf[0] == 0x02 {
-            let len: usize = String::from_utf8(buf[1..].to_vec())?.parse()?;
-            stream.write_all(&messages.read().unwrap().clone()[len..])?;
-        }
-    } else if buf[0] == 0x01 {
-        messages.write().unwrap().append(&mut buf[1..].to_vec());
-    } else if buf[0] == 0x02 {
-        
-    } else if buf[0] == 0x03 {
+        let mut msg = Vec::new();
 
+        msg.append(&mut message_prefix(
+            Local::now().timestamp_millis(), 
+            &stream.peer_addr()?.ip().to_string()).as_bytes().to_vec()
+        );
+        msg.push(b' ');
+        msg.append(&mut buf);
+
+        println!("{}", String::from_utf8_lossy(&msg));
+        
+        msg.push(b'\n');
+
+        messages.write().unwrap().append(&mut msg.clone());
+
+    } else if buf[0] == 0x02 {
+        // sending authorized messages
+    } else if buf[0] == 0x03 {
+        // user registration
     }
 
     Ok(())
