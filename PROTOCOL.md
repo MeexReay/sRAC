@@ -55,6 +55,12 @@ Client sends:
 - `\n`
 - Message
 
+Server sends:
+
+- nothing if message was sent successfully
+- `0x01` if the user does not exists
+- `0x02` if the password is incorrect
+
 ## Registration users
 
 Client sends:
@@ -66,4 +72,5 @@ Client sends:
 
 Server sends:
 
+- nothing if user was registered successfully
 - `0x01` if the username is already taken

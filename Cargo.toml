@@ -5,4 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.40"
-bRAC = { git = "https://github.com/MeexReay/bRAC.git" }
+bRAC = { git = "https://github.com/MeexReay/bRAC.git", default-features = false, tag = "0.1.2+2.0" }
+md-5 = "0.10.6"
+rand = "0.9.0"
+clap = { version = "4.5.36", features = ["derive"] }
