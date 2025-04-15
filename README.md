@@ -23,7 +23,8 @@ cargo run -- \
 ```
 ## Roadmap
 
-- Wrap with SSL
-- Proxy-mode
-- Notifications by ip
-- Server comands
+- [ ] Wrap with SSL
+- [ ] Proxy-mode
+- [ ] Notifications by ip
+- [ ] Server commands
+- [ ] WRAC proxy
