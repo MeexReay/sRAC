@@ -181,7 +181,7 @@ fn add_message(
 
 fn accept_stream(
     args: Arc<Args>,
-    stream: &mut (impl Read + Write), 
+    mut stream: impl Read + Write, 
     addr: SocketAddr,
     messages: Arc<RwLock<Vec<u8>>>,
     accounts: Arc<RwLock<Vec<Account>>>
@@ -294,14 +294,14 @@ fn accept_stream(
                 .append(true)
                 .create(true)
                 .open(accounts_file)?;
-    
+
             file.write_all(&account.to_bytes())?;
             file.write_all(b"\n")?;
             file.flush()?;
         }
 
         println!("user registered: {name}");
-        
+
         accounts.write().unwrap().push(account);
     }
 
@@ -312,7 +312,7 @@ fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<
     let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
 
     for stream in listener.incoming() {
-        let Ok(mut stream) = stream else { continue };
+        let Ok(stream) = stream else { continue };
 
         let messages = messages.clone();
         let accounts = accounts.clone();
@@ -320,7 +320,7 @@ fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<
 
         thread::spawn(move || {
             let Ok(addr) = stream.peer_addr() else { return; };
-            let _ = accept_stream(args, &mut stream, addr, messages, accounts);
+            let _ = accept_stream(args, stream, addr, messages, accounts);
         });
     }
 }
@@ -361,7 +361,7 @@ fn run_secure_listener(
                 let Ok(_) = stream.conn.complete_io(&mut stream.sock) else { return };
             }
 
-            let _ = accept_stream(args, &mut stream, addr, messages, accounts);
+            let _ = accept_stream(args, stream, addr, messages, accounts);
         });
     }
 }
@@ -407,7 +407,11 @@ struct Args {
 
     /// Set ssl key path (x509)
     #[arg(long)]
-    ssl_cert: Option<String>
+    ssl_cert: Option<String>,
+
+    /// Enable WRAC
+    #[arg(short='w', long)]
+    enable_wrac: bool,
 }
 
 fn main() {

@@ -13,6 +13,8 @@ Client sends:
 
 ## Reading messages
 
+### Getting message length
+
 Client sends:
 
 - Byte `0x00`
@@ -23,6 +25,8 @@ Server sends:
 
 ### Normal reading
 
+*Firstly, process getting message length packet*
+
 Client sends:
 
 - Byte `0x01`
@@ -32,6 +36,8 @@ Server sends:
 - All messages
 
 ### Chunked reading
+
+*Firstly, process getting message length packet*
 
 Client sends:
 
@@ -74,3 +80,44 @@ Server sends:
 
 - nothing if user was registered successfully
 - `0x01` if the username is already taken
+
+# WRAC Protocol
+
+Default port - 42666
+
+Uses websocket for connections, and sends binary data only
+
+Totally inherits all packets except reading messages packets writed here
+
+## Reading messages
+
+### Normal reading
+
+~~*Firstly, process getting message length packet*~~
+
+This packet is independent from getting message length packet.
+
+Client sends:
+
+- **Byte `0x00`**
+- Byte `0x01`
+
+Server sends:
+
+- All messages
+
+### Chunked reading
+
+~~*Firstly, process getting message length packet*~~
+
+This packet is independent from getting message length packet.
+
+Client sends:
+
+- **Byte `0x00`**
+- Byte `0x02`
+- Size of messages you have in ASCII (last_size)
+
+Server sends:
+
+- All new messages
