@@ -25,5 +25,5 @@ cargo run -- \
 
 - [ ] Notifications by ip
 - [ ] Server commands
-- [ ] WRAC protocol
+- [x] WRAC protocol
 - [x] RACS protocol
