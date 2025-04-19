@@ -9,3 +9,5 @@ bRAC = { git = "https://github.com/MeexReay/bRAC.git", default-features = false,
 md-5 = "0.10.6"
 rand = "0.9.0"
 clap = { version = "4.5.36", features = ["derive"] }
+rustls = "0.23.25"
+pkcs12 = "=0.1.0"

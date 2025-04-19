@@ -1,4 +1,4 @@
-use std::{error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Write}, net::{IpAddr, TcpListener, TcpStream}, sync::{Arc, RwLock}, thread};
+use std::{error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Write}, net::{IpAddr, SocketAddr, TcpListener}, sync::{Arc, RwLock}, thread};
 
 use bRAC::{chat::format_message, util::sanitize_text};
 use chrono::{DateTime, Local, TimeZone};
@@ -6,6 +6,7 @@ use md5::{Digest, Md5};
 use rand::{distr::Alphanumeric, Rng};
 
 use clap::Parser;
+use rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerConfig, ServerConnection, StreamOwned};
 
 
 #[derive(Clone)]
@@ -180,7 +181,8 @@ fn add_message(
 
 fn accept_stream(
     args: Arc<Args>,
-    mut stream: TcpStream, 
+    stream: &mut (impl Read + Write), 
+    addr: SocketAddr,
     messages: Arc<RwLock<Vec<u8>>>,
     accounts: Arc<RwLock<Vec<Account>>>
 ) -> Result<(), Box<dyn Error>> {
@@ -230,7 +232,7 @@ fn accept_stream(
             let size = stream.read(&mut buf)?;
             buf.truncate(size);
     
-            add_message(&mut buf, messages.clone(), Some(stream.peer_addr()?.ip()), args.sanitize, args.messages_file.clone())?;
+            add_message(&mut buf, messages.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
         }
     } else if buf[0] == 0x02 {
         let mut buf = vec![0; 8192];
@@ -269,7 +271,7 @@ fn accept_stream(
         let Some(name) = segments.next() else { return Ok(()) };
         let Some(password) = segments.next() else { return Ok(()) };
 
-        let addr = stream.peer_addr()?.ip().to_string();
+        let addr = addr.ip().to_string();
 
         let now: i64 = Local::now().timestamp_millis();
 
@@ -306,6 +308,64 @@ fn accept_stream(
     Ok(())
 }
 
+fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<Account>>>, args: Arc<Args>) {
+    let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
+
+    for stream in listener.incoming() {
+        let Ok(mut stream) = stream else { continue };
+
+        let messages = messages.clone();
+        let accounts = accounts.clone();
+        let args = args.clone();
+
+        thread::spawn(move || {
+            let Ok(addr) = stream.peer_addr() else { return; };
+            let _ = accept_stream(args, &mut stream, addr, messages, accounts);
+        });
+    }
+}
+
+fn run_secure_listener(
+    messages: Arc<RwLock<Vec<u8>>>, 
+    accounts: Arc<RwLock<Vec<Account>>>, 
+    args: Arc<Args>
+) {
+    let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
+
+    let server_config  = Arc::new(ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(CertificateDer::pem_file_iter(
+            args.ssl_cert.clone().expect("--ssl-cert is required"))
+            .unwrap()
+            .map(|cert| cert.unwrap())
+            .collect(), 
+            PrivateKeyDer::from_pem_file(
+                args.ssl_key.clone().expect("--ssl-key is required")).unwrap()
+            ).unwrap());
+
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+
+        let messages = messages.clone();
+        let accounts = accounts.clone();
+        let args = args.clone();
+        let server_config = server_config.clone();
+
+        thread::spawn(move || {
+            let Ok(addr) = stream.peer_addr() else { return; };
+
+            let Ok(connection) = ServerConnection::new(server_config) else { return };
+            let mut stream = StreamOwned::new(connection, stream);
+
+            while stream.conn.is_handshaking() {
+                let Ok(_) = stream.conn.complete_io(&mut stream.sock) else { return };
+            }
+
+            let _ = accept_stream(args, &mut stream, addr, messages, accounts);
+        });
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(version)]
 struct Args {
@@ -335,13 +395,23 @@ struct Args {
 
     /// Register timeout in seconds
     #[arg(short='r', long, default_value_t = 600)]
-    register_timeout: usize
+    register_timeout: usize,
+
+    /// Enable SSL (RACS)
+    #[arg(short='l', long)]
+    enable_ssl: bool,
+
+    /// Set ssl certificate path (x509)
+    #[arg(long)]
+    ssl_key: Option<String>,
+
+    /// Set ssl key path (x509)
+    #[arg(long)]
+    ssl_cert: Option<String>
 }
 
 fn main() {
     let args = Arc::new(Args::parse());
-
-    let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
 
     let messages = Arc::new(RwLock::new(
         if let Some(messages_file) = args.messages_file.clone() {
@@ -374,15 +444,9 @@ fn main() {
 
     println!("Server started on {}", &args.host);
 
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-
-        let messages = messages.clone();
-        let accounts = accounts.clone();
-        let args = args.clone();
-
-        thread::spawn(move || {
-            let _ = accept_stream(args, stream, messages, accounts);
-        });
+    if args.enable_ssl {
+        run_secure_listener(messages, accounts, args);
+    } else {
+        run_normal_listener(messages, accounts, args);
     }
 }
