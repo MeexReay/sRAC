@@ -7,7 +7,7 @@ use rand::{distr::Alphanumeric, Rng};
 
 use clap::Parser;
 use rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerConfig, ServerConnection, StreamOwned};
-use tungstenite::{accept, Bytes, Message, WebSocket};
+use tungstenite::{accept, Bytes, Message};
 
 
 #[derive(Clone)]
@@ -188,15 +188,17 @@ fn accept_stream(
     accounts: Arc<RwLock<Vec<Account>>>
 ) -> Result<(), Box<dyn Error>> {
     if args.enable_wrac {
-        let mut websocket = accept(stream).unwrap();
+        let mut websocket = match accept(stream) {
+            Ok(i) => i,
+            Err(e) => return Err(format!("accept websocket error: {}", e).into()),
+        };
 
         while let Ok(msg) = websocket.read() {
-            if let Some(data) = if msg.is_binary() {
-                Some(msg.into_data().to_vec())
-            } else if msg.is_text() {
-                msg.into_text().ok().map(|o| o.as_bytes().to_vec())
-            } else {
-                None
+            if let Some(data) = match msg {
+                Message::Binary(o) => Some(o.to_vec()),
+                Message::Text(o) => Some(o.as_bytes().to_vec()),
+                Message::Close(_) => return Ok(()),
+                _ => None
             } {
                 let mut data = data;
                 let Some(id) = data.drain(..1).next() else { return Ok(()) };
@@ -210,6 +212,7 @@ fn accept_stream(
                         } else {
                             websocket.write(Message::Binary(Bytes::from(messages.len().to_string().as_bytes().to_vec())))?;
                         }
+                        websocket.flush()?;
                     } else {
                         let Some(id) = data.drain(..1).next() else { return Ok(()) };
 
@@ -218,6 +221,7 @@ fn accept_stream(
                                 messages.append(&mut splash.clone().as_bytes().to_vec());
                             }
                             websocket.write(Message::Binary(Bytes::from(messages)))?;
+                            websocket.flush()?;
                         } else if id == 0x02 {
                             let last_size: usize = String::from_utf8(data)?.parse()?;
                             if let Some(splash) = &args.splash {
@@ -225,6 +229,7 @@ fn accept_stream(
                             } else {
                                 websocket.write(Message::Binary(Bytes::from(messages[last_size..].to_vec())))?;
                             }
+                            websocket.flush()?;
                         }
                     }
                 } else if id == 0x01 {
@@ -248,6 +253,7 @@ fn accept_stream(
                                 add_message(&mut text.as_bytes().to_vec(), messages.clone(), None, args.sanitize, args.messages_file.clone())?;
                             } else {
                                 websocket.write(Message::Binary(Bytes::from(vec![0x02])))?;
+                                websocket.flush()?;
                             }
                             sent = true;
                             break;
@@ -256,6 +262,7 @@ fn accept_stream(
         
                     if !sent {
                         websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                        websocket.flush()?;
                     }
                 } else if id == 0x03 {
                     let msg = String::from_utf8_lossy(&data).to_string();
@@ -274,11 +281,13 @@ fn accept_stream(
                     for user in accounts.read().unwrap().iter() {
                         if user.name() == name {
                             websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                            websocket.flush()?;
                             continue_send = true;
                             break;
                         }
                         if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
                             websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                            websocket.flush()?;
                             continue_send = true;
                             break;
                         }
@@ -442,7 +451,10 @@ fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<
 
         thread::spawn(move || {
             let Ok(addr) = stream.peer_addr() else { return; };
-            let _ = accept_stream(args, stream, addr, messages, accounts);
+            match accept_stream(args, stream, addr, messages, accounts) {
+                Ok(_) => {},
+                Err(e) => { println!("{}", e) },
+            }
         });
     }
 }
@@ -483,7 +495,10 @@ fn run_secure_listener(
                 let Ok(_) = stream.conn.complete_io(&mut stream.sock) else { return };
             }
 
-            let _ = accept_stream(args, stream, addr, messages, accounts);
+            match accept_stream(args, stream, addr, messages, accounts) {
+                Ok(_) => {},
+                Err(e) => { println!("{}", e) },
+            }
         });
     }
 }
