@@ -81,9 +81,13 @@ Server sends:
 - nothing if user was registered successfully
 - `0x01` if the username is already taken
 
+# RACS Protocol
+
+Default port - 42667
+
 # WRAC Protocol
 
-Default port - 42666
+Default port - 52666
 
 Uses websocket for connections, and sends binary data only
 
@@ -121,3 +125,7 @@ Client sends:
 Server sends:
 
 - All new messages
+
+# WRACS Protocol
+
+Default port - 52667

@@ -10,6 +10,11 @@ use rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerC
 use tungstenite::{accept, Bytes, Message};
 
 
+pub struct Context {
+    messages: RwLock<Vec<u8>>, 
+    accounts: RwLock<Vec<Account>>
+}
+
 #[derive(Clone)]
 pub struct Account {
     name: String,
@@ -140,7 +145,7 @@ fn message_prefix(time_millis: i64, address: Option<String>) -> String {
 
 fn add_message(
     buf: &mut Vec<u8>, 
-    messages: Arc<RwLock<Vec<u8>>>, 
+    context: Arc<Context>, 
     addr: Option<IpAddr>,
     sanitize: bool,
     messages_file: Option<String>
@@ -175,283 +180,307 @@ fn add_message(
         file.flush()?;
     }
 
-    messages.write().unwrap().append(&mut msg.clone());
+    context.messages.write().unwrap().append(&mut msg.clone());
 
     Ok(())
 }
 
-fn accept_stream(
-    args: Arc<Args>,
-    mut stream: impl Read + Write, 
+fn accept_wrac_stream(
+    stream: impl Read + Write, 
     addr: SocketAddr,
-    messages: Arc<RwLock<Vec<u8>>>,
-    accounts: Arc<RwLock<Vec<Account>>>
+    context: Arc<Context>,
+    args: Arc<Args>
 ) -> Result<(), Box<dyn Error>> {
-    if args.enable_wrac {
-        let mut websocket = match accept(stream) {
-            Ok(i) => i,
-            Err(e) => return Err(format!("accept websocket error: {}", e).into()),
-        };
+    let mut websocket = match accept(stream) {
+        Ok(i) => i,
+        Err(e) => return Err(format!("accept websocket error: {}", e).into()),
+    };
 
-        while let Ok(msg) = websocket.read() {
-            if let Some(data) = match msg {
-                Message::Binary(o) => Some(o.to_vec()),
-                Message::Text(o) => Some(o.as_bytes().to_vec()),
-                Message::Close(_) => return Ok(()),
-                _ => None
-            } {
-                let mut data = data;
-                let Some(id) = data.drain(..1).next() else { return Ok(()) };
+    while let Ok(msg) = websocket.read() {
+        if let Some(data) = match msg {
+            Message::Binary(o) => Some(o.to_vec()),
+            Message::Text(o) => Some(o.as_bytes().to_vec()),
+            Message::Close(_) => return Ok(()),
+            _ => None
+        } {
+            let mut data = data;
+            let Some(id) = data.drain(..1).next() else { return Ok(()) };
 
-                if id == 0x00 {
-                    let mut messages = messages.read().unwrap().clone();
+            if id == 0x00 {
+                let mut messages = context.messages.read().unwrap().clone();
 
-                    if data.is_empty() {
+                if data.is_empty() {
+                    if let Some(splash) = &args.splash {
+                        websocket.write(Message::Binary(Bytes::from((messages.len() + splash.len()).to_string().as_bytes().to_vec())))?;
+                    } else {
+                        websocket.write(Message::Binary(Bytes::from(messages.len().to_string().as_bytes().to_vec())))?;
+                    }
+                    websocket.flush()?;
+                } else {
+                    let Some(id) = data.drain(..1).next() else { return Ok(()) };
+
+                    if id == 0x01 {
                         if let Some(splash) = &args.splash {
-                            websocket.write(Message::Binary(Bytes::from((messages.len() + splash.len()).to_string().as_bytes().to_vec())))?;
+                            messages.append(&mut splash.clone().as_bytes().to_vec());
+                        }
+                        websocket.write(Message::Binary(Bytes::from(messages)))?;
+                        websocket.flush()?;
+                    } else if id == 0x02 {
+                        let last_size: usize = String::from_utf8(data)?.parse()?;
+                        if let Some(splash) = &args.splash {
+                            websocket.write(Message::Binary(Bytes::from(messages[(last_size - splash.len())..].to_vec())))?;
                         } else {
-                            websocket.write(Message::Binary(Bytes::from(messages.len().to_string().as_bytes().to_vec())))?;
+                            websocket.write(Message::Binary(Bytes::from(messages[last_size..].to_vec())))?;
                         }
                         websocket.flush()?;
-                    } else {
-                        let Some(id) = data.drain(..1).next() else { return Ok(()) };
+                    }
+                }
+            } else if id == 0x01 {
+                if !args.auth_only {
+                    add_message(&mut data, context.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
+                }
+            } else if id == 0x02 {
+                let msg = String::from_utf8_lossy(&data).to_string();
+    
+                let mut segments = msg.split("\n");
+    
+                let Some(name) = segments.next() else { return Ok(()) };
+                let Some(password) = segments.next() else { return Ok(()) };
+                let Some(text) = segments.next() else { return Ok(()) };
+    
+                let mut sent = false;
 
-                        if id == 0x01 {
-                            if let Some(splash) = &args.splash {
-                                messages.append(&mut splash.clone().as_bytes().to_vec());
-                            }
-                            websocket.write(Message::Binary(Bytes::from(messages)))?;
-                            websocket.flush()?;
-                        } else if id == 0x02 {
-                            let last_size: usize = String::from_utf8(data)?.parse()?;
-                            if let Some(splash) = &args.splash {
-                                websocket.write(Message::Binary(Bytes::from(messages[(last_size - splash.len())..].to_vec())))?;
-                            } else {
-                                websocket.write(Message::Binary(Bytes::from(messages[last_size..].to_vec())))?;
-                            }
+                for user in context.accounts.read().unwrap().iter() {
+                    if user.name() == name {
+                        if user.check_password(password) {
+                            add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize, args.messages_file.clone())?;
+                        } else {
+                            websocket.write(Message::Binary(Bytes::from(vec![0x02])))?;
                             websocket.flush()?;
                         }
+                        sent = true;
+                        break;
                     }
-                } else if id == 0x01 {
-                    if !args.auth_only {
-                        add_message(&mut data, messages.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
-                    }
-                } else if id == 0x02 {
-                    let msg = String::from_utf8_lossy(&data).to_string();
-        
-                    let mut segments = msg.split("\n");
-        
-                    let Some(name) = segments.next() else { return Ok(()) };
-                    let Some(password) = segments.next() else { return Ok(()) };
-                    let Some(text) = segments.next() else { return Ok(()) };
-        
-                    let mut sent = false;
+                }
+    
+                if !sent {
+                    websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                    websocket.flush()?;
+                }
+            } else if id == 0x03 {
+                let msg = String::from_utf8_lossy(&data).to_string();
+    
+                let mut segments = msg.split("\n");
+    
+                let Some(name) = segments.next() else { return Ok(()) };
+                let Some(password) = segments.next() else { return Ok(()) };
+    
+                let addr = addr.ip().to_string();
+    
+                let now: i64 = Local::now().timestamp_millis();
 
-                    for user in accounts.read().unwrap().iter() {
-                        if user.name() == name {
-                            if user.check_password(password) {
-                                add_message(&mut text.as_bytes().to_vec(), messages.clone(), None, args.sanitize, args.messages_file.clone())?;
-                            } else {
-                                websocket.write(Message::Binary(Bytes::from(vec![0x02])))?;
-                                websocket.flush()?;
-                            }
-                            sent = true;
-                            break;
-                        }
-                    }
-        
-                    if !sent {
+                let mut continue_send = false;
+    
+                for user in context.accounts.read().unwrap().iter() {
+                    if user.name() == name {
                         websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
                         websocket.flush()?;
+                        continue_send = true;
+                        break;
                     }
-                } else if id == 0x03 {
-                    let msg = String::from_utf8_lossy(&data).to_string();
-        
-                    let mut segments = msg.split("\n");
-        
-                    let Some(name) = segments.next() else { return Ok(()) };
-                    let Some(password) = segments.next() else { return Ok(()) };
-        
-                    let addr = addr.ip().to_string();
-        
-                    let now: i64 = Local::now().timestamp_millis();
-
-                    let mut continue_send = false;
-        
-                    for user in accounts.read().unwrap().iter() {
-                        if user.name() == name {
-                            websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
-                            websocket.flush()?;
-                            continue_send = true;
-                            break;
-                        }
-                        if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
-                            websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
-                            websocket.flush()?;
-                            continue_send = true;
-                            break;
-                        }
+                    if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
+                        websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                        websocket.flush()?;
+                        continue_send = true;
+                        break;
                     }
-
-                    if continue_send {
-                        continue;
-                    }
-        
-                    let account = Account::new(name.to_string(), password.to_string(), addr, now);
-        
-                    if let Some(accounts_file) = args.accounts_file.clone() {
-                        let mut file = OpenOptions::new()
-                            .write(true)
-                            .append(true)
-                            .create(true)
-                            .open(accounts_file)?;
-        
-                        file.write_all(&account.to_bytes())?;
-                        file.write_all(b"\n")?;
-                        file.flush()?;
-                    }
-        
-                    accounts.write().unwrap().push(account);
                 }
+
+                if continue_send {
+                    continue;
+                }
+    
+                let account = Account::new(name.to_string(), password.to_string(), addr, now);
+    
+                if let Some(accounts_file) = args.accounts_file.clone() {
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .append(true)
+                        .create(true)
+                        .open(accounts_file)?;
+    
+                    file.write_all(&account.to_bytes())?;
+                    file.write_all(b"\n")?;
+                    file.flush()?;
+                }
+    
+                context.accounts.write().unwrap().push(account);
             }
         }
-    } else {
-        let mut buf = vec![0];
-        stream.read_exact(&mut buf)?;
+    }
 
-        if buf[0] == 0x00 {
-            let mut messages = messages.read().unwrap().clone();
 
-            if let Some(splash) = &args.splash {
-                stream.write_all((splash.len() + messages.len()).to_string().as_bytes())?;
+    Ok(())
+}
 
-                let mut id = vec![0];
-                stream.read_exact(&mut id)?;
-        
-                if id[0] == 0x01 {
-                    messages.append(&mut splash.clone().as_bytes().to_vec());
-                    stream.write_all(&messages)?;
-                } else if id[0] == 0x02 {
-                    let mut buf = vec![0; 10];
-                    let size = stream.read(&mut buf)?;
-                    buf.truncate(size);
-        
-                    let len: usize = String::from_utf8(buf)?.parse()?;
-                    stream.write_all(&messages[(len - splash.len())..])?;
-                }
-            } else {
-                stream.write_all(messages.len().to_string().as_bytes())?;
+fn accept_rac_stream(
+    mut stream: impl Read + Write, 
+    addr: SocketAddr,
+    context: Arc<Context>,
+    args: Arc<Args>
+) -> Result<(), Box<dyn Error>> {
+    let mut buf = vec![0];
+    stream.read_exact(&mut buf)?;
 
-                let mut id = vec![0];
-                stream.read_exact(&mut id)?;
+    if buf[0] == 0x00 {
+        let mut messages = context.messages.read().unwrap().clone();
 
-                if id[0] == 0x01 {
-                    stream.write_all(&messages)?;
-                } else if id[0] == 0x02 {
-                    let mut buf = vec![0; 10];
-                    let size = stream.read(&mut buf)?;
-                    buf.truncate(size);
+        if let Some(splash) = &args.splash {
+            stream.write_all((splash.len() + messages.len()).to_string().as_bytes())?;
 
-                    let len: usize = String::from_utf8(buf)?.parse()?;
-                    stream.write_all(&messages[len..])?;
-                }
-            }
-        } else if buf[0] == 0x01 {
-            if !args.auth_only {
-                let mut buf = vec![0; 1024];
+            let mut id = vec![0];
+            stream.read_exact(&mut id)?;
+    
+            if id[0] == 0x01 {
+                messages.append(&mut splash.clone().as_bytes().to_vec());
+                stream.write_all(&messages)?;
+            } else if id[0] == 0x02 {
+                let mut buf = vec![0; 10];
                 let size = stream.read(&mut buf)?;
                 buf.truncate(size);
-        
-                add_message(&mut buf, messages.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
+    
+                let len: usize = String::from_utf8(buf)?.parse()?;
+                stream.write_all(&messages[(len - splash.len())..])?;
             }
-        } else if buf[0] == 0x02 {
-            let mut buf = vec![0; 8192];
-            let size = stream.read(&mut buf)?;
-            buf.truncate(size);
+        } else {
+            stream.write_all(messages.len().to_string().as_bytes())?;
 
-            let msg = String::from_utf8_lossy(&buf).to_string();
+            let mut id = vec![0];
+            stream.read_exact(&mut id)?;
 
-            let mut segments = msg.split("\n");
+            if id[0] == 0x01 {
+                stream.write_all(&messages)?;
+            } else if id[0] == 0x02 {
+                let mut buf = vec![0; 10];
+                let size = stream.read(&mut buf)?;
+                buf.truncate(size);
 
-            let Some(name) = segments.next() else { return Ok(()) };
-            let Some(password) = segments.next() else { return Ok(()) };
-            let Some(text) = segments.next() else { return Ok(()) };
-
-            for user in accounts.read().unwrap().iter() {
-                if user.name() == name {
-                    if user.check_password(password) {
-                        add_message(&mut text.as_bytes().to_vec(), messages.clone(), None, args.sanitize, args.messages_file.clone())?;
-                    } else {
-                        stream.write_all(&[0x02])?;
-                    }
-                    return Ok(());
-                }
+                let len: usize = String::from_utf8(buf)?.parse()?;
+                stream.write_all(&messages[len..])?;
             }
-
-            stream.write_all(&[0x01])?;
-        } else if buf[0] == 0x03 {
+        }
+    } else if buf[0] == 0x01 {
+        if !args.auth_only {
             let mut buf = vec![0; 1024];
             let size = stream.read(&mut buf)?;
             buf.truncate(size);
-
-            let msg = String::from_utf8_lossy(&buf).to_string();
-
-            let mut segments = msg.split("\n");
-
-            let Some(name) = segments.next() else { return Ok(()) };
-            let Some(password) = segments.next() else { return Ok(()) };
-
-            let addr = addr.ip().to_string();
-
-            let now: i64 = Local::now().timestamp_millis();
-
-            for user in accounts.read().unwrap().iter() {
-                if user.name() == name {
-                    stream.write_all(&[0x01])?;
-                    return Ok(());
-                }
-                if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
-                    stream.write_all(&[0x01])?;
-                    return Ok(());
-                }
-            }
-
-            let account = Account::new(name.to_string(), password.to_string(), addr, now);
-
-            if let Some(accounts_file) = args.accounts_file.clone() {
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .create(true)
-                    .open(accounts_file)?;
-
-                file.write_all(&account.to_bytes())?;
-                file.write_all(b"\n")?;
-                file.flush()?;
-            }
-
-            println!("user registered: {name}");
-
-            accounts.write().unwrap().push(account);
+    
+            add_message(&mut buf, context.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
         }
+    } else if buf[0] == 0x02 {
+        let mut buf = vec![0; 8192];
+        let size = stream.read(&mut buf)?;
+        buf.truncate(size);
+
+        let msg = String::from_utf8_lossy(&buf).to_string();
+
+        let mut segments = msg.split("\n");
+
+        let Some(name) = segments.next() else { return Ok(()) };
+        let Some(password) = segments.next() else { return Ok(()) };
+        let Some(text) = segments.next() else { return Ok(()) };
+
+        for user in context.accounts.read().unwrap().iter() {
+            if user.name() == name {
+                if user.check_password(password) {
+                    add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize, args.messages_file.clone())?;
+                } else {
+                    stream.write_all(&[0x02])?;
+                }
+                return Ok(());
+            }
+        }
+
+        stream.write_all(&[0x01])?;
+    } else if buf[0] == 0x03 {
+        let mut buf = vec![0; 1024];
+        let size = stream.read(&mut buf)?;
+        buf.truncate(size);
+
+        let msg = String::from_utf8_lossy(&buf).to_string();
+
+        let mut segments = msg.split("\n");
+
+        let Some(name) = segments.next() else { return Ok(()) };
+        let Some(password) = segments.next() else { return Ok(()) };
+
+        let addr = addr.ip().to_string();
+
+        let now: i64 = Local::now().timestamp_millis();
+
+        for user in context.accounts.read().unwrap().iter() {
+            if user.name() == name {
+                stream.write_all(&[0x01])?;
+                return Ok(());
+            }
+            if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
+                stream.write_all(&[0x01])?;
+                return Ok(());
+            }
+        }
+
+        let account = Account::new(name.to_string(), password.to_string(), addr, now);
+
+        if let Some(accounts_file) = args.accounts_file.clone() {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(accounts_file)?;
+
+            file.write_all(&account.to_bytes())?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+        }
+
+        println!("user registered: {name}");
+
+        context.accounts.write().unwrap().push(account);
     }
 
     Ok(())
 }
 
-fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<Account>>>, args: Arc<Args>) {
+fn accept_stream(
+    stream: impl Read + Write, 
+    addr: SocketAddr,
+    context: Arc<Context>,
+    args: Arc<Args>
+) -> Result<(), Box<dyn Error>> {
+    if args.enable_wrac {
+        accept_wrac_stream(stream, addr, context, args)?;
+    } else {
+        accept_rac_stream(stream, addr, context, args)?;
+    }
+
+    Ok(())
+}
+
+fn run_normal_listener(
+    context: Arc<Context>, 
+    args: Arc<Args>
+) {
     let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
 
-        let messages = messages.clone();
-        let accounts = accounts.clone();
+        let context = context.clone();
         let args = args.clone();
 
         thread::spawn(move || {
             let Ok(addr) = stream.peer_addr() else { return; };
-            match accept_stream(args, stream, addr, messages, accounts) {
+            match accept_stream(stream, addr, context, args) {
                 Ok(_) => {},
                 Err(e) => { println!("{}", e) },
             }
@@ -460,8 +489,7 @@ fn run_normal_listener(messages: Arc<RwLock<Vec<u8>>>, accounts: Arc<RwLock<Vec<
 }
 
 fn run_secure_listener(
-    messages: Arc<RwLock<Vec<u8>>>, 
-    accounts: Arc<RwLock<Vec<Account>>>, 
+    context: Arc<Context>, 
     args: Arc<Args>
 ) {
     let listener = TcpListener::bind(&args.host).expect("error trying bind to the provided addr");
@@ -480,8 +508,7 @@ fn run_secure_listener(
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
 
-        let messages = messages.clone();
-        let accounts = accounts.clone();
+        let context = context.clone();
         let args = args.clone();
         let server_config = server_config.clone();
 
@@ -495,7 +522,7 @@ fn run_secure_listener(
                 let Ok(_) = stream.conn.complete_io(&mut stream.sock) else { return };
             }
 
-            match accept_stream(args, stream, addr, messages, accounts) {
+            match accept_stream(stream, addr, context, args) {
                 Ok(_) => {},
                 Err(e) => { println!("{}", e) },
             }
@@ -551,43 +578,47 @@ struct Args {
     enable_wrac: bool,
 }
 
+fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
+    if let Some(accounts_file) = accounts_file.clone() {
+        if fs::exists(&accounts_file).expect("error checking accounts file") {
+            fs::read(&accounts_file)
+                .expect("error reading accounts file")
+                .split(|o| *o == b'\n')
+                .filter(|o| !o.is_empty())
+                .map(|o| Account::from_bytes(o.to_vec()))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
+
+fn load_messages(messages_file: Option<String>) -> Vec<u8> {
+    if let Some(messages_file) = messages_file.clone() {
+        if fs::exists(&messages_file).expect("error checking messages file") {
+            fs::read(&messages_file).expect("error reading messages file")
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
+
 fn main() {
     let args = Arc::new(Args::parse());
 
-    let messages = Arc::new(RwLock::new(
-        if let Some(messages_file) = args.messages_file.clone() {
-            if fs::exists(&messages_file).expect("error checking messages file") {
-                fs::read(&messages_file).expect("error reading messages file")
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        }
-    ));
-
-    let accounts = Arc::new(RwLock::new(
-        if let Some(accounts_file) = args.accounts_file.clone() {
-            if fs::exists(&accounts_file).expect("error checking accounts file") {
-                fs::read(&accounts_file)
-                    .expect("error reading accounts file")
-                    .split(|o| *o == b'\n')
-                    .filter(|o| !o.is_empty())
-                    .map(|o| Account::from_bytes(o.to_vec()))
-                    .collect()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        }
-    ));
+    let messages = RwLock::new(load_messages(args.messages_file.clone()));
+    let accounts = RwLock::new(load_accounts(args.accounts_file.clone()));
+    let context = Arc::new(Context { messages, accounts });
 
     println!("Server started on {}", &args.host);
 
     if args.enable_ssl {
-        run_secure_listener(messages, accounts, args);
+        run_secure_listener(context, args);
     } else {
-        run_normal_listener(messages, accounts, args);
+        run_normal_listener(context, args);
     }
 }
