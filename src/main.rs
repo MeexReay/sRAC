@@ -1,4 +1,4 @@
-use std::{error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Write}, net::{IpAddr, SocketAddr, TcpListener}, sync::{Arc, RwLock}, thread};
+use std::{collections::HashMap, error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Write}, net::{IpAddr, SocketAddr, TcpListener}, sync::{Arc, RwLock}, thread, time::Duration};
 
 use bRAC::{chat::format_message, util::sanitize_text};
 use chrono::{DateTime, Local, TimeZone};
@@ -10,9 +10,107 @@ use rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerC
 use tungstenite::{accept, Bytes, Message};
 
 
+fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
+    if let Some(accounts_file) = accounts_file.clone() {
+        if fs::exists(&accounts_file).expect("error checking accounts file") {
+            fs::read(&accounts_file)
+                .expect("error reading accounts file")
+                .split(|o| *o == b'\n')
+                .filter(|o| !o.is_empty())
+                .map(|o| Account::from_bytes(o.to_vec()))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
+
+fn load_messages(messages_file: Option<String>) -> Vec<u8> {
+    if let Some(messages_file) = messages_file.clone() {
+        if fs::exists(&messages_file).expect("error checking messages file") {
+            fs::read(&messages_file).expect("error reading messages file")
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
+
 pub struct Context {
+    messages_file: Option<String>,
+    accounts_file: Option<String>,
     messages: RwLock<Vec<u8>>, 
-    accounts: RwLock<Vec<Account>>
+    accounts: RwLock<Vec<Account>>,
+    timeouts: RwLock<HashMap<u32, Duration>>,
+    messages_offset: RwLock<usize>
+}
+
+impl Context {
+    fn new(
+        messages_file: Option<String>,
+        accounts_file: Option<String>
+    ) -> Self {
+        Self {
+            messages_file: messages_file.clone(),
+            accounts_file: accounts_file.clone(),
+            messages: RwLock::new(load_messages(messages_file.clone())),
+            accounts: RwLock::new(load_accounts(accounts_file.clone())),
+            timeouts: RwLock::new(HashMap::new()),
+            messages_offset: RwLock::new(0)
+        }
+    }
+
+    fn push_message(&self, msg: Vec<u8>) {
+        if let Some(messages_file) = self.messages_file.clone() {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(messages_file).expect("error messages file open");
+
+            file.write_all(&msg).expect("error messages file write");
+            file.flush().expect("error messages file flush");
+        }
+
+        self.messages.write().unwrap().append(&mut msg.clone());
+    }
+
+    fn get_account_by_addr(&self, addr: &str) -> Option<Account> {
+        for acc in self.accounts.read().unwrap().iter() {
+            if acc.addr() == addr {
+                return Some(acc.clone())
+            }
+        }
+        None
+    }
+
+    fn get_account(&self, name: &str) -> Option<Account> {
+        for acc in self.accounts.read().unwrap().iter() {
+            if acc.name() == name {
+                return Some(acc.clone())
+            }
+        }
+        None
+    }
+
+    fn push_account(&self, acc: Account) {
+        if let Some(accounts_file) = self.accounts_file.clone() {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(accounts_file).expect("error accounts file open");
+
+            file.write_all(&acc.to_bytes()).expect("error accounts file write");
+            file.write_all(b"\n").expect("error accounts file write");
+            file.flush().expect("error accounts file flush");
+        }
+
+        self.accounts.write().unwrap().push(acc);
+    }
 }
 
 #[derive(Clone)]
@@ -147,8 +245,7 @@ fn add_message(
     buf: &mut Vec<u8>, 
     context: Arc<Context>, 
     addr: Option<IpAddr>,
-    sanitize: bool,
-    messages_file: Option<String>
+    sanitize: bool
 ) -> Result<(), Box<dyn Error>> {
     let mut msg = Vec::new();
 
@@ -169,18 +266,7 @@ fn add_message(
 
     msg.push(b'\n');
 
-    if let Some(messages_file) = messages_file {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .open(messages_file)?;
-
-        file.write_all(&msg)?;
-        file.flush()?;
-    }
-
-    context.messages.write().unwrap().append(&mut msg.clone());
+    context.push_message(msg);
 
     Ok(())
 }
@@ -237,7 +323,7 @@ fn accept_wrac_stream(
                 }
             } else if id == 0x01 {
                 if !args.auth_only {
-                    add_message(&mut data, context.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
+                    add_message(&mut data, context.clone(), Some(addr.ip()), args.sanitize)?;
                 }
             } else if id == 0x02 {
                 let msg = String::from_utf8_lossy(&data).to_string();
@@ -248,22 +334,14 @@ fn accept_wrac_stream(
                 let Some(password) = segments.next() else { return Ok(()) };
                 let Some(text) = segments.next() else { return Ok(()) };
     
-                let mut sent = false;
-
-                for user in context.accounts.read().unwrap().iter() {
-                    if user.name() == name {
-                        if user.check_password(password) {
-                            add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize, args.messages_file.clone())?;
-                        } else {
-                            websocket.write(Message::Binary(Bytes::from(vec![0x02])))?;
-                            websocket.flush()?;
-                        }
-                        sent = true;
-                        break;
+                if let Some(acc) = context.get_account(name) {
+                    if acc.check_password(password) {
+                        add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize)?;
+                    } else {
+                        websocket.write(Message::Binary(Bytes::from(vec![0x02])))?;
+                        websocket.flush()?;
                     }
-                }
-    
-                if !sent {
+                } else {
                     websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
                     websocket.flush()?;
                 }
@@ -279,42 +357,23 @@ fn accept_wrac_stream(
     
                 let now: i64 = Local::now().timestamp_millis();
 
-                let mut continue_send = false;
-    
-                for user in context.accounts.read().unwrap().iter() {
-                    if user.name() == name {
-                        websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
-                        websocket.flush()?;
-                        continue_send = true;
-                        break;
+                if context.get_account(name).is_some() || (
+                    if let Some(acc) = context.get_account_by_addr(&addr) {
+                        ((now - acc.date()) as usize) < 1000 * args.register_timeout
+                    } else {
+                        false
                     }
-                    if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
-                        websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
-                        websocket.flush()?;
-                        continue_send = true;
-                        break;
-                    }
-                }
-
-                if continue_send {
+                ) {
+                    websocket.write(Message::Binary(Bytes::from(vec![0x01])))?;
+                    websocket.flush()?;
                     continue;
                 }
     
                 let account = Account::new(name.to_string(), password.to_string(), addr, now);
+
+                println!("user registered: {name}");
     
-                if let Some(accounts_file) = args.accounts_file.clone() {
-                    let mut file = OpenOptions::new()
-                        .write(true)
-                        .append(true)
-                        .create(true)
-                        .open(accounts_file)?;
-    
-                    file.write_all(&account.to_bytes())?;
-                    file.write_all(b"\n")?;
-                    file.flush()?;
-                }
-    
-                context.accounts.write().unwrap().push(account);
+                context.push_account(account);
             }
         }
     }
@@ -375,7 +434,7 @@ fn accept_rac_stream(
             let size = stream.read(&mut buf)?;
             buf.truncate(size);
     
-            add_message(&mut buf, context.clone(), Some(addr.ip()), args.sanitize, args.messages_file.clone())?;
+            add_message(&mut buf, context.clone(), Some(addr.ip()), args.sanitize)?;
         }
     } else if buf[0] == 0x02 {
         let mut buf = vec![0; 8192];
@@ -390,18 +449,15 @@ fn accept_rac_stream(
         let Some(password) = segments.next() else { return Ok(()) };
         let Some(text) = segments.next() else { return Ok(()) };
 
-        for user in context.accounts.read().unwrap().iter() {
-            if user.name() == name {
-                if user.check_password(password) {
-                    add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize, args.messages_file.clone())?;
-                } else {
-                    stream.write_all(&[0x02])?;
-                }
-                return Ok(());
+        if let Some(acc) = context.get_account(name) {
+            if acc.check_password(password) {
+                add_message(&mut text.as_bytes().to_vec(), context.clone(), None, args.sanitize)?;
+            } else {
+                stream.write_all(&[0x02])?;
             }
+        } else {
+            stream.write_all(&[0x01])?;
         }
-
-        stream.write_all(&[0x01])?;
     } else if buf[0] == 0x03 {
         let mut buf = vec![0; 1024];
         let size = stream.read(&mut buf)?;
@@ -418,34 +474,22 @@ fn accept_rac_stream(
 
         let now: i64 = Local::now().timestamp_millis();
 
-        for user in context.accounts.read().unwrap().iter() {
-            if user.name() == name {
-                stream.write_all(&[0x01])?;
-                return Ok(());
+        if context.get_account(name).is_some() || (
+            if let Some(acc) = context.get_account_by_addr(&addr) {
+                ((now - acc.date()) as usize) < 1000 * args.register_timeout
+            } else {
+                false
             }
-            if user.addr() == addr && ((now - user.date()) as usize) < 1000 * args.register_timeout {
-                stream.write_all(&[0x01])?;
-                return Ok(());
-            }
+        ) {
+            stream.write_all(&[0x01])?;
+            return Ok(());
         }
 
         let account = Account::new(name.to_string(), password.to_string(), addr, now);
 
-        if let Some(accounts_file) = args.accounts_file.clone() {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .append(true)
-                .create(true)
-                .open(accounts_file)?;
-
-            file.write_all(&account.to_bytes())?;
-            file.write_all(b"\n")?;
-            file.flush()?;
-        }
-
         println!("user registered: {name}");
 
-        context.accounts.write().unwrap().push(account);
+        context.push_account(account);
     }
 
     Ok(())
@@ -578,41 +622,11 @@ struct Args {
     enable_wrac: bool,
 }
 
-fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
-    if let Some(accounts_file) = accounts_file.clone() {
-        if fs::exists(&accounts_file).expect("error checking accounts file") {
-            fs::read(&accounts_file)
-                .expect("error reading accounts file")
-                .split(|o| *o == b'\n')
-                .filter(|o| !o.is_empty())
-                .map(|o| Account::from_bytes(o.to_vec()))
-                .collect()
-        } else {
-            Vec::new()
-        }
-    } else {
-        Vec::new()
-    }
-}
-
-fn load_messages(messages_file: Option<String>) -> Vec<u8> {
-    if let Some(messages_file) = messages_file.clone() {
-        if fs::exists(&messages_file).expect("error checking messages file") {
-            fs::read(&messages_file).expect("error reading messages file")
-        } else {
-            Vec::new()
-        }
-    } else {
-        Vec::new()
-    }
-}
 
 fn main() {
     let args = Arc::new(Args::parse());
 
-    let messages = RwLock::new(load_messages(args.messages_file.clone()));
-    let accounts = RwLock::new(load_accounts(args.accounts_file.clone()));
-    let context = Arc::new(Context { messages, accounts });
+    let context = Arc::new(Context::new(args.messages_file.clone(), args.accounts_file.clone()));
 
     println!("Server started on {}", &args.host);
 
