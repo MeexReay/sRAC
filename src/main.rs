@@ -79,7 +79,7 @@ impl Context {
     }
 
     fn get_account_by_addr(&self, addr: &str) -> Option<Account> {
-        for acc in self.accounts.read().unwrap().iter() {
+        for acc in self.accounts.read().unwrap().iter().rev() {
             if acc.addr() == addr {
                 return Some(acc.clone())
             }
