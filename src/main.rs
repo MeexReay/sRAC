@@ -45,7 +45,8 @@ pub struct Context {
     messages: RwLock<Vec<u8>>, 
     accounts: RwLock<Vec<Account>>,
     timeouts: RwLock<HashMap<u32, Duration>>,
-    messages_offset: RwLock<usize>
+    messages_offset: RwLock<usize>,
+    notifications: RwLock<HashMap<u32, Vec<u8>>>
 }
 
 impl Context {
@@ -59,7 +60,8 @@ impl Context {
             messages: RwLock::new(load_messages(messages_file.clone())),
             accounts: RwLock::new(load_accounts(accounts_file.clone())),
             timeouts: RwLock::new(HashMap::new()),
-            messages_offset: RwLock::new(0)
+            messages_offset: RwLock::new(0),
+            notifications: RwLock::new(HashMap::new()),
         }
     }
 
@@ -604,6 +606,18 @@ struct Args {
     /// Register timeout in seconds
     #[arg(short='r', long, default_value_t = 600)]
     register_timeout: usize,
+
+    /// Message timeout in seconds
+    #[arg(short='m', long, default_value_t = 5)]
+    message_timeout: usize,
+
+    /// Message limit in bytes
+    #[arg(short='m', long, default_value_t = 4096)]
+    message_limit: usize,
+
+    /// Messages total limit in bytes
+    #[arg(short='m', long, default_value_t = 4194304)]
+    messages_total_limit: usize,
 
     /// Enable SSL (RACS)
     #[arg(short='l', long)]
