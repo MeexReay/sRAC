@@ -612,11 +612,11 @@ struct Args {
     message_timeout: usize,
 
     /// Message limit in bytes
-    #[arg(short='m', long, default_value_t = 4096)]
+    #[arg(long, default_value_t = 4096)]
     message_limit: usize,
 
     /// Messages total limit in bytes
-    #[arg(short='m', long, default_value_t = 4194304)]
+    #[arg(long, default_value_t = 4194304)]
     messages_total_limit: usize,
 
     /// Enable SSL (RACS)
