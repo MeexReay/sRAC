@@ -71,6 +71,9 @@ pub fn on_send_message(
     message: Vec<u8>,
 ) -> Result<(), Box<dyn Error>> {
     if !ctx.args.auth_only {
+        let mut message = message;
+        message.truncate(ctx.args.message_limit);
+
         add_message(
             &mut message.clone(),
             ctx.clone(),
@@ -90,12 +93,22 @@ pub fn on_send_auth_message(
 ) -> Result<Option<u8>, Box<dyn Error>> {
     if let Some(acc) = ctx.get_account(name) {
         if acc.check_password(password) {
+            let mut name = name.to_string();
+            name.truncate(256); // FIXME: softcode this
+
+            let mut password = password.to_string();
+            password.truncate(256); // FIXME: softcode this
+
+            let mut text = text.to_string();
+            text.truncate(ctx.args.message_limit);
+
             add_message(
                 &mut text.as_bytes().to_vec(),
                 ctx.clone(),
                 None,
                 ctx.args.sanitize,
             )?;
+
             Ok(None)
         } else {
             Ok(Some(0x02))
