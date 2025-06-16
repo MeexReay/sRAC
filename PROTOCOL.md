@@ -85,6 +85,8 @@ Server sends:
 
 Default port - 42667
 
+The same as RAC, but wrapped with TLS
+
 # WRAC Protocol
 
 Default port - 52666
@@ -129,3 +131,5 @@ Server sends:
 # WRACS Protocol
 
 Default port - 52667
+
+Just the same WRAC protocol but wrapped with TLS, like RACS
