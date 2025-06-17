@@ -74,12 +74,7 @@ pub fn on_send_message(
         let mut message = message;
         message.truncate(ctx.args.message_limit);
 
-        add_message(
-            &mut message.clone(),
-            ctx.clone(),
-            Some(addr.ip()),
-            ctx.args.sanitize,
-        )?;
+        add_message(&message.clone(), ctx.clone(), Some(addr.ip()))?;
     }
     Ok(())
 }
@@ -102,12 +97,7 @@ pub fn on_send_auth_message(
             let mut text = text.to_string();
             text.truncate(ctx.args.message_limit);
 
-            add_message(
-                &mut text.as_bytes().to_vec(),
-                ctx.clone(),
-                None,
-                ctx.args.sanitize,
-            )?;
+            add_message(&text.as_bytes(), ctx.clone(), None)?;
 
             Ok(None)
         } else {
@@ -142,7 +132,7 @@ pub fn on_register_user(
 
     info!("user registered: {name}");
 
-    ctx.push_account(account);
+    ctx.push_account(account)?;
 
     Ok(None)
 }

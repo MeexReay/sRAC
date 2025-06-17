@@ -26,7 +26,7 @@ fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
                 .expect("error reading accounts file")
                 .split(|o| *o == b'\n')
                 .filter(|o| !o.is_empty())
-                .map(|o| Account::from_bytes(o.to_vec()))
+                .filter_map(|o| Account::from_bytes(o.to_vec()).ok())
                 .collect()
         } else {
             Vec::new()
@@ -77,17 +77,16 @@ impl Context {
         }
     }
 
-    pub fn push_message(&self, msg: Vec<u8>) {
+    pub fn push_message(&self, msg: Vec<u8>) -> Result<(), Box<dyn Error>> {
         if let Some(messages_file) = self.messages_file.clone() {
             let mut file = OpenOptions::new()
                 .write(true)
                 .append(true)
                 .create(true)
-                .open(messages_file)
-                .expect("error messages file open");
+                .open(messages_file)?;
 
-            file.write_all(&msg).expect("error messages file write");
-            file.flush().expect("error messages file flush");
+            file.write_all(&msg)?;
+            file.flush()?;
         }
 
         self.messages.write().unwrap().append(&mut msg.clone());
@@ -96,9 +95,17 @@ impl Context {
 
         if content.len() > self.args.messages_total_limit {
             let offset = content.len() - self.args.messages_total_limit;
-            *self.messages.write().unwrap() = content[offset..].to_vec();
+            let content = content[offset..].to_vec();
+
+            *self.messages.write().unwrap() = content.clone();
             self.messages_offset.store(offset as u64, Ordering::SeqCst);
+
+            if let Some(messages_file) = self.messages_file.clone() {
+                fs::write(messages_file, &content)?;
+            }
         }
+
+        Ok(())
     }
 
     pub fn get_account_by_addr(&self, addr: &str) -> Option<Account> {
@@ -119,22 +126,22 @@ impl Context {
         None
     }
 
-    pub fn push_account(&self, acc: Account) {
+    pub fn push_account(&self, acc: Account) -> Result<(), Box<dyn Error>> {
         if let Some(accounts_file) = self.accounts_file.clone() {
             let mut file = OpenOptions::new()
                 .write(true)
                 .append(true)
                 .create(true)
-                .open(accounts_file)
-                .expect("error accounts file open");
+                .open(accounts_file)?;
 
-            file.write_all(&acc.to_bytes())
-                .expect("error accounts file write");
-            file.write_all(b"\n").expect("error accounts file write");
-            file.flush().expect("error accounts file flush");
+            file.write_all(&acc.to_bytes())?;
+            file.write_all(b"\n")?;
+            file.flush()?;
         }
 
         self.accounts.write().unwrap().push(acc);
+
+        Ok(())
     }
 }
 
@@ -204,51 +211,51 @@ impl Account {
         data
     }
 
-    pub fn from_bytes(text: Vec<u8>) -> Self {
+    pub fn from_bytes(text: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut text = Cursor::new(text);
 
         let mut name_len = [0; 4];
-        text.read_exact(&mut name_len).unwrap();
+        text.read_exact(&mut name_len)?;
         let name_len = u32::from_le_bytes(name_len) as usize;
 
         let mut salt_len = [0; 4];
-        text.read_exact(&mut salt_len).unwrap();
+        text.read_exact(&mut salt_len)?;
         let salt_len = u32::from_le_bytes(salt_len) as usize;
 
         let mut addr_len = [0; 4];
-        text.read_exact(&mut addr_len).unwrap();
+        text.read_exact(&mut addr_len)?;
         let addr_len = u32::from_le_bytes(addr_len) as usize;
 
         let mut pass_len = [0; 4];
-        text.read_exact(&mut pass_len).unwrap();
+        text.read_exact(&mut pass_len)?;
         let pass_len = u32::from_le_bytes(pass_len) as usize;
 
         let mut name = vec![0; name_len];
-        text.read_exact(&mut name).unwrap();
+        text.read_exact(&mut name)?;
         let name = String::from_utf8_lossy(&name).to_string();
 
         let mut salt = vec![0; salt_len];
-        text.read_exact(&mut salt).unwrap();
+        text.read_exact(&mut salt)?;
         let salt = String::from_utf8_lossy(&salt).to_string();
 
         let mut addr = vec![0; addr_len];
-        text.read_exact(&mut addr).unwrap();
+        text.read_exact(&mut addr)?;
         let addr = String::from_utf8_lossy(&addr).to_string();
 
         let mut pass = vec![0; pass_len];
-        text.read_exact(&mut pass).unwrap();
+        text.read_exact(&mut pass)?;
 
         let mut date = [0; 8];
-        text.read_exact(&mut date).unwrap();
+        text.read_exact(&mut date)?;
         let date = i64::from_le_bytes(date);
 
-        Account {
+        Ok(Account {
             name,
             salt,
             pass,
             addr,
             date,
-        }
+        })
     }
 }
 
@@ -267,27 +274,21 @@ fn message_prefix(time_millis: i64, address: Option<String>) -> String {
 }
 
 pub fn add_message(
-    buf: &mut Vec<u8>,
-    context: Arc<Context>,
+    text: &[u8],
+    ctx: Arc<Context>,
     addr: Option<IpAddr>,
-    sanitize: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let mut msg = Vec::new();
+    let prefix = message_prefix(Local::now().timestamp_millis(), addr.map(|o| o.to_string()));
+    let mut msg = prefix.as_bytes().to_vec();
 
-    msg.append(
-        &mut message_prefix(Local::now().timestamp_millis(), addr.map(|o| o.to_string()))
-            .as_bytes()
-            .to_vec(),
-    );
-
-    if sanitize {
+    if ctx.args.sanitize {
         msg.append(
-            &mut sanitize_text(&String::from_utf8_lossy(&buf.clone()))
+            &mut sanitize_text(&String::from_utf8_lossy(text))
                 .as_bytes()
                 .to_vec(),
         );
     } else {
-        msg.append(buf);
+        msg.append(&mut text.to_vec());
     }
 
     if let Some(msg) = format_message(addr.is_some(), String::from_utf8_lossy(&msg).to_string()) {
@@ -295,8 +296,7 @@ pub fn add_message(
     }
 
     msg.push(b'\n');
-
-    context.push_message(msg);
+    ctx.push_message(msg)?;
 
     Ok(())
 }
