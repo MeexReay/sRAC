@@ -98,7 +98,8 @@ impl Context {
             let content = content[offset..].to_vec();
 
             *self.messages.write().unwrap() = content.clone();
-            self.messages_offset.store(offset as u64, Ordering::SeqCst);
+            self.messages_offset
+                .fetch_add(offset as u64, Ordering::SeqCst);
 
             if let Some(messages_file) = self.messages_file.clone() {
                 fs::write(messages_file, &content)?;
