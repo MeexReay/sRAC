@@ -71,9 +71,9 @@ impl Context {
             accounts_file: accounts_file.clone(),
             messages: RwLock::new(load_messages(messages_file.clone())),
             accounts: RwLock::new(load_accounts(accounts_file.clone())),
-            timeouts: RwLock::new(HashMap::new()),
             messages_offset: AtomicU64::default(),
             notifications: RwLock::new(HashMap::new()),
+            timeouts: RwLock::new(HashMap::new()),
         }
     }
 
