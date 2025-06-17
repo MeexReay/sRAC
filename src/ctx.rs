@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     error::Error,
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{Cursor, Read, Write},
     net::IpAddr,
     sync::{
@@ -17,7 +17,36 @@ use log::info;
 use md5::{Digest, Md5};
 use rand::{Rng, distr::Alphanumeric};
 
-use crate::{Args, load_accounts, load_messages};
+use crate::Args;
+
+fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
+    if let Some(accounts_file) = accounts_file.clone() {
+        if fs::exists(&accounts_file).expect("error checking accounts file") {
+            fs::read(&accounts_file)
+                .expect("error reading accounts file")
+                .split(|o| *o == b'\n')
+                .filter(|o| !o.is_empty())
+                .map(|o| Account::from_bytes(o.to_vec()))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
+
+fn load_messages(messages_file: Option<String>) -> Vec<u8> {
+    if let Some(messages_file) = messages_file.clone() {
+        if fs::exists(&messages_file).expect("error checking messages file") {
+            fs::read(&messages_file).expect("error reading messages file")
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    }
+}
 
 pub struct Context {
     pub args: Arc<Args>,
