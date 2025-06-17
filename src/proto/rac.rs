@@ -38,13 +38,13 @@ pub fn accept_rac_stream(
             )?)?;
         }
     } else if buf[0] == 0x01 {
-        let mut buf = vec![0; 1024];
+        let mut buf = vec![0; ctx.args.message_limit];
         let size = stream.read(&mut buf)?;
         buf.truncate(size);
 
         on_send_message(ctx.clone(), addr.clone(), buf)?;
     } else if buf[0] == 0x02 {
-        let mut buf = vec![0; 8192];
+        let mut buf = vec![0; ctx.args.message_limit + 2 + 512]; // FIXME: softcode this (512 = name + password)
         let size = stream.read(&mut buf)?;
         buf.truncate(size);
 

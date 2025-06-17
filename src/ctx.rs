@@ -26,7 +26,7 @@ pub struct Context {
     pub messages: RwLock<Vec<u8>>,
     pub accounts: RwLock<Vec<Account>>,
     pub messages_offset: AtomicU64,
-    pub notifications: RwLock<HashMap<u32, Vec<u8>>>,
+    pub notifications: RwLock<HashMap<u32, Vec<u8>>>, // u32 - ip
     pub timeouts: RwLock<HashMap<u32, Duration>>,
 }
 

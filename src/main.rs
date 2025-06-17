@@ -1,30 +1,16 @@
-use std::{
-    error::Error,
-    fs,
-    io::{Read, Write},
-    net::{SocketAddr, TcpListener},
-    sync::Arc,
-    thread,
-};
-
-use log::{debug, info};
+use std::{fs, sync::Arc};
 
 use clap::Parser;
-use rustls::{
-    ServerConfig, ServerConnection, StreamOwned,
-    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-};
+use log::info;
 
 use crate::{
     ctx::{Account, Context},
-    rac::accept_rac_stream,
-    wrac::accept_wrac_stream,
+    proto::run_listener,
 };
 
-mod ctx;
-mod logic;
-mod rac;
-mod wrac;
+pub mod ctx;
+pub mod logic;
+pub mod proto;
 
 fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
     if let Some(accounts_file) = accounts_file.clone() {
@@ -55,100 +41,9 @@ fn load_messages(messages_file: Option<String>) -> Vec<u8> {
     }
 }
 
-fn accept_stream(
-    stream: impl Read + Write,
-    addr: SocketAddr,
-    ctx: Arc<Context>,
-) -> Result<(), Box<dyn Error>> {
-    if ctx.args.enable_wrac {
-        accept_wrac_stream(stream, addr, ctx)?;
-    } else {
-        accept_rac_stream(stream, addr, ctx)?;
-    }
-
-    Ok(())
-}
-
-fn run_normal_listener(ctx: Arc<Context>) {
-    let listener =
-        TcpListener::bind(&ctx.args.host).expect("error trying bind to the provided addr");
-
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-
-        let ctx = ctx.clone();
-
-        thread::spawn(move || {
-            let Ok(addr) = stream.peer_addr() else {
-                return;
-            };
-            match accept_stream(stream, addr, ctx) {
-                Ok(_) => {}
-                Err(e) => {
-                    debug!("{}", e)
-                }
-            }
-        });
-    }
-}
-
-fn run_secure_listener(ctx: Arc<Context>) {
-    let listener =
-        TcpListener::bind(&ctx.args.host).expect("error trying bind to the provided addr");
-
-    let server_config = Arc::new(
-        ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(
-                CertificateDer::pem_file_iter(
-                    ctx.args.ssl_cert.clone().expect("--ssl-cert is required"),
-                )
-                .unwrap()
-                .map(|cert| cert.unwrap())
-                .collect(),
-                PrivateKeyDer::from_pem_file(
-                    ctx.args.ssl_key.clone().expect("--ssl-key is required"),
-                )
-                .unwrap(),
-            )
-            .unwrap(),
-    );
-
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-
-        let ctx = ctx.clone();
-        let server_config = server_config.clone();
-
-        thread::spawn(move || {
-            let Ok(addr) = stream.peer_addr() else {
-                return;
-            };
-
-            let Ok(connection) = ServerConnection::new(server_config) else {
-                return;
-            };
-            let mut stream = StreamOwned::new(connection, stream);
-
-            while stream.conn.is_handshaking() {
-                let Ok(_) = stream.conn.complete_io(&mut stream.sock) else {
-                    return;
-                };
-            }
-
-            match accept_stream(stream, addr, ctx) {
-                Ok(_) => {}
-                Err(e) => {
-                    debug!("{}", e)
-                }
-            }
-        });
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(version)]
-struct Args {
+pub struct Args {
     /// Server host
     #[arg(short = 'H', long)]
     host: String,
@@ -219,9 +114,5 @@ fn main() {
 
     info!("Server started on {}", &args.host);
 
-    if args.enable_ssl {
-        run_secure_listener(context);
-    } else {
-        run_normal_listener(context);
-    }
+    run_listener(context);
 }
