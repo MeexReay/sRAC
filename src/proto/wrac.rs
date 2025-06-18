@@ -35,7 +35,7 @@ pub fn accept_wrac_stream(
 
             if id == 0x00 {
                 if data.is_empty() {
-                    let total_size = on_total_size(ctx.clone(), addr.clone())?;
+                    let total_size = on_total_size(ctx.clone(), addr)?;
                     sent_size = Some(total_size);
 
                     websocket.write(Message::Binary(Bytes::from(
@@ -50,7 +50,7 @@ pub fn accept_wrac_stream(
                     if id == 0x01 {
                         websocket.write(Message::Binary(Bytes::from(on_total_data(
                             ctx.clone(),
-                            addr.clone(),
+                            addr,
                             sent_size,
                         )?)))?;
                         websocket.flush()?;
@@ -58,7 +58,7 @@ pub fn accept_wrac_stream(
                         let client_has = String::from_utf8(data)?.parse()?;
                         websocket.write(Message::Binary(Bytes::from(on_chunked_data(
                             ctx.clone(),
-                            addr.clone(),
+                            addr,
                             sent_size,
                             client_has,
                         )?)))?;
@@ -66,7 +66,7 @@ pub fn accept_wrac_stream(
                     }
                 }
             } else if id == 0x01 {
-                on_send_message(ctx.clone(), addr.clone(), data)?;
+                on_send_message(ctx.clone(), addr, data)?;
             } else if id == 0x02 {
                 let msg = String::from_utf8_lossy(&data).to_string();
 
@@ -83,7 +83,7 @@ pub fn accept_wrac_stream(
                 };
 
                 if let Some(resp_id) =
-                    on_send_auth_message(ctx.clone(), addr.clone(), name, password, text)?
+                    on_send_auth_message(ctx.clone(), addr, name, password, text)?
                 {
                     websocket.write(Message::Binary(Bytes::from(vec![resp_id])))?;
                     websocket.flush()?;
@@ -96,12 +96,12 @@ pub fn accept_wrac_stream(
                 let Some(name) = segments.next() else {
                     return Ok(());
                 };
+
                 let Some(password) = segments.next() else {
                     return Ok(());
                 };
 
-                if let Some(resp_id) = on_register_user(ctx.clone(), addr.clone(), name, password)?
-                {
+                if let Some(resp_id) = on_register_user(ctx.clone(), addr, name, password)? {
                     websocket.write(Message::Binary(Bytes::from(vec![resp_id])))?;
                     websocket.flush()?;
                 }
