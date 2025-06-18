@@ -1,3 +1,5 @@
+use std::{error::Error, io::Read};
+
 use colored::{Color, Colorize};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -93,4 +95,22 @@ pub fn find_username_color(message: &str) -> Option<(String, String, Color)> {
         }
     }
     None
+}
+
+pub fn read_u32<R>(cursor: &mut R) -> Result<u32, Box<dyn Error>>
+where
+    R: Read,
+{
+    let mut buf = [0; 4];
+    cursor.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
+}
+
+pub fn read_string<R>(cursor: &mut R, len: usize) -> Result<String, Box<dyn Error>>
+where
+    R: Read,
+{
+    let mut buf = vec![0; len];
+    cursor.read_exact(&mut buf)?;
+    String::from_utf8(buf).map_err(|e| e.into())
 }

@@ -18,7 +18,7 @@ use rand::{Rng, distr::Alphanumeric};
 
 use crate::{
     Args,
-    util::{format_message, sanitize_text},
+    util::{format_message, read_string, read_u32, sanitize_text},
 };
 
 fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
@@ -214,24 +214,11 @@ impl Account {
 
     pub fn from_bytes(text: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut cursor = Cursor::new(text);
-        
-        let read_u32 = |cursor: &mut Cursor<Vec<u8>>| -> Result<u32, Box<dyn Error>> {
-            let mut buf = [0; 4];
-            cursor.read_exact(&mut buf)?;
-            Ok(u32::from_le_bytes(buf))
-        };
-        
+
         let name_len = read_u32(&mut cursor)? as usize;
         let salt_len = read_u32(&mut cursor)? as usize;
         let addr_len = read_u32(&mut cursor)? as usize;
         let pass_len = read_u32(&mut cursor)? as usize;
-        
-        let read_string = |cursor: &mut Cursor<Vec<u8>>, len: usize| -> Result<String, Box<dyn Error>> {
-            let mut buf = vec![0; len];
-            cursor.read_exact(&mut buf)?;
-            String::from_utf8(buf).map_err(|e| e.into())
-        };
-        
         let name = read_string(&mut cursor, name_len)?;
         let salt = read_string(&mut cursor, salt_len)?;
         let addr = read_string(&mut cursor, addr_len)?;
