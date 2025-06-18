@@ -8,6 +8,7 @@ use crate::{ctx::Context, proto::run_listener};
 pub mod ctx;
 pub mod logic;
 pub mod proto;
+pub mod util;
 
 #[derive(Parser, Debug)]
 #[command(version)]

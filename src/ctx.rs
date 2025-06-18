@@ -11,13 +11,15 @@ use std::{
     time::Duration,
 };
 
-use bRAC::{chat::format_message, util::sanitize_text};
 use chrono::{DateTime, Local, TimeZone};
 use log::info;
 use md5::{Digest, Md5};
 use rand::{Rng, distr::Alphanumeric};
 
-use crate::Args;
+use crate::{
+    Args,
+    util::{format_message, sanitize_text},
+};
 
 fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
     if let Some(accounts_file) = accounts_file.clone() {
