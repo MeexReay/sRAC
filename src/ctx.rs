@@ -71,8 +71,8 @@ impl Context {
             args,
             messages_file: messages_file.clone(),
             accounts_file: accounts_file.clone(),
-            messages: RwLock::new(load_messages(messages_file.clone())),
-            accounts: RwLock::new(load_accounts(accounts_file.clone())),
+            messages: RwLock::new(load_messages(messages_file)),
+            accounts: RwLock::new(load_accounts(accounts_file)),
             messages_offset: AtomicU64::default(),
             notifications: RwLock::new(HashMap::new()),
             timeouts: RwLock::new(HashMap::new()),
@@ -82,7 +82,6 @@ impl Context {
     pub fn push_message(&self, msg: Vec<u8>) -> Result<(), Box<dyn Error>> {
         if let Some(messages_file) = self.messages_file.clone() {
             let mut file = OpenOptions::new()
-                .write(true)
                 .append(true)
                 .create(true)
                 .open(messages_file)?;
@@ -112,27 +111,26 @@ impl Context {
     }
 
     pub fn get_account_by_addr(&self, addr: &str) -> Option<Account> {
-        for acc in self.accounts.read().unwrap().iter().rev() {
-            if acc.addr() == addr {
-                return Some(acc.clone());
-            }
-        }
-        None
+        self.accounts
+            .read()
+            .unwrap()
+            .iter()
+            .find(|acc| acc.addr() == addr)
+            .cloned()
     }
 
     pub fn get_account(&self, name: &str) -> Option<Account> {
-        for acc in self.accounts.read().unwrap().iter() {
-            if acc.name() == name {
-                return Some(acc.clone());
-            }
-        }
-        None
+        self.accounts
+            .read()
+            .unwrap()
+            .iter()
+            .find(|acc| acc.name() == name)
+            .cloned()
     }
 
     pub fn push_account(&self, acc: Account) -> Result<(), Box<dyn Error>> {
         if let Some(accounts_file) = self.accounts_file.clone() {
             let mut file = OpenOptions::new()
-                .write(true)
                 .append(true)
                 .create(true)
                 .open(accounts_file)?;
@@ -215,41 +213,34 @@ impl Account {
     }
 
     pub fn from_bytes(text: Vec<u8>) -> Result<Self, Box<dyn Error>> {
-        let mut text = Cursor::new(text);
-
-        let mut name_len = [0; 4];
-        text.read_exact(&mut name_len)?;
-        let name_len = u32::from_le_bytes(name_len) as usize;
-
-        let mut salt_len = [0; 4];
-        text.read_exact(&mut salt_len)?;
-        let salt_len = u32::from_le_bytes(salt_len) as usize;
-
-        let mut addr_len = [0; 4];
-        text.read_exact(&mut addr_len)?;
-        let addr_len = u32::from_le_bytes(addr_len) as usize;
-
-        let mut pass_len = [0; 4];
-        text.read_exact(&mut pass_len)?;
-        let pass_len = u32::from_le_bytes(pass_len) as usize;
-
-        let mut name = vec![0; name_len];
-        text.read_exact(&mut name)?;
-        let name = String::from_utf8_lossy(&name).to_string();
-
-        let mut salt = vec![0; salt_len];
-        text.read_exact(&mut salt)?;
-        let salt = String::from_utf8_lossy(&salt).to_string();
-
-        let mut addr = vec![0; addr_len];
-        text.read_exact(&mut addr)?;
-        let addr = String::from_utf8_lossy(&addr).to_string();
+        let mut cursor = Cursor::new(text);
+        
+        let read_u32 = |cursor: &mut Cursor<Vec<u8>>| -> Result<u32, Box<dyn Error>> {
+            let mut buf = [0; 4];
+            cursor.read_exact(&mut buf)?;
+            Ok(u32::from_le_bytes(buf))
+        };
+        
+        let name_len = read_u32(&mut cursor)? as usize;
+        let salt_len = read_u32(&mut cursor)? as usize;
+        let addr_len = read_u32(&mut cursor)? as usize;
+        let pass_len = read_u32(&mut cursor)? as usize;
+        
+        let read_string = |cursor: &mut Cursor<Vec<u8>>, len: usize| -> Result<String, Box<dyn Error>> {
+            let mut buf = vec![0; len];
+            cursor.read_exact(&mut buf)?;
+            String::from_utf8(buf).map_err(|e| e.into())
+        };
+        
+        let name = read_string(&mut cursor, name_len)?;
+        let salt = read_string(&mut cursor, salt_len)?;
+        let addr = read_string(&mut cursor, addr_len)?;
 
         let mut pass = vec![0; pass_len];
-        text.read_exact(&mut pass)?;
+        cursor.read_exact(&mut pass)?;
 
         let mut date = [0; 8];
-        text.read_exact(&mut date)?;
+        cursor.read_exact(&mut date)?;
         let date = i64::from_le_bytes(date);
 
         Ok(Account {
