@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.40"
 md-5 = "0.10.6"
-rand = "0.9.0"
+rand = "0.9.1"
 clap = { version = "4.5.36", features = ["derive"] }
 rustls = "0.23.25"
 tungstenite = "0.27.0"
@@ -15,3 +15,4 @@ log = "0.4.27"
 regex = "1.11.1"
 colored = "3.0.0"
 lazy_static = "1.5.0"
+bRAC = { git = "https://github.com/MeexReay/bRAC.git" }

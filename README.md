@@ -1,29 +1,32 @@
 # sRAC
 simple server for RAC
 
-## Usage
+## features
+
+- RACv2.0 and WRACv2.0 protocols
+- SSL encryption (via rustls)
+- messages limits by size
+- splash message
+- message sanitizing (removes all shit)
+- auth-only mode and accounts
+- messages saving into file
+- register and message timeouts
+
+## usage
 
 ```bash
-git clone https://github.com/MeexReay/sRAC
-cd sRAC
-cargo run -- -H 127.0.0.1:42666
+git clone https://github.com/MeexReay/sRAC.git; cd sRAC
+cargo run -- -H rac://127.0.0.1:42666
 ```
 
-### My server config
+## roadmap
 
-```bash
-cargo run -- \
-  --host 127.0.0.1:42666 \
-  --splash "please register (/register and /login commands in bRAC)" \
-  --messages-file "messages.txt" \
-  --accounts-file "accounts.txt" \
-  --register-timeout 3600 \
-  --sanitize \
-  --auth-only
-```
-## Roadmap
-
+- [ ] Proxy-mode
 - [ ] Notifications by ip
 - [ ] Server commands
 - [x] WRAC protocol
 - [x] RACS protocol
+
+## license
+
+This project is licensed under the WTFPL. Do what the fuck you want to. 
