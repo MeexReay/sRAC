@@ -24,8 +24,9 @@ fn accept_stream(
     stream: impl Read + Write,
     addr: SocketAddr,
     ctx: Arc<Context>,
+    wrac: bool,
 ) -> Result<(), Box<dyn Error>> {
-    if ctx.args.enable_wrac {
+    if wrac {
         accept_wrac_stream(stream, addr, ctx)?;
     } else {
         accept_rac_stream(stream, addr, ctx)?;
@@ -34,9 +35,8 @@ fn accept_stream(
     Ok(())
 }
 
-fn run_normal_listener(ctx: Arc<Context>) {
-    let listener =
-        TcpListener::bind(&ctx.args.host).expect("error trying bind to the provided addr");
+fn run_normal_listener(ctx: Arc<Context>, host: &str, wrac: bool) {
+    let listener = TcpListener::bind(host).expect("error trying bind to the provided addr");
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -47,7 +47,7 @@ fn run_normal_listener(ctx: Arc<Context>) {
             let Ok(addr) = stream.peer_addr() else {
                 return;
             };
-            match accept_stream(stream, addr, ctx) {
+            match accept_stream(stream, addr, ctx, wrac) {
                 Ok(_) => {}
                 Err(e) => {
                     debug!("{}", e)
@@ -57,9 +57,8 @@ fn run_normal_listener(ctx: Arc<Context>) {
     }
 }
 
-fn run_secure_listener(ctx: Arc<Context>) {
-    let listener =
-        TcpListener::bind(&ctx.args.host).expect("error trying bind to the provided addr");
+fn run_secure_listener(ctx: Arc<Context>, host: &str, wrac: bool) {
+    let listener = TcpListener::bind(host).expect("error trying bind to the provided addr");
 
     let server_config = Arc::new(
         ServerConfig::builder()
@@ -101,7 +100,7 @@ fn run_secure_listener(ctx: Arc<Context>) {
                 };
             }
 
-            match accept_stream(stream, addr, ctx) {
+            match accept_stream(stream, addr, ctx, wrac) {
                 Ok(_) => {}
                 Err(e) => {
                     debug!("{}", e)
@@ -111,10 +110,10 @@ fn run_secure_listener(ctx: Arc<Context>) {
     }
 }
 
-pub fn run_listener(ctx: Arc<Context>) {
-    if ctx.args.enable_ssl {
-        run_secure_listener(ctx);
+pub fn run_listener(ctx: Arc<Context>, host: &str, ssl: bool, wrac: bool) {
+    if ssl {
+        run_secure_listener(ctx, host, wrac);
     } else {
-        run_normal_listener(ctx);
+        run_normal_listener(ctx, host, wrac);
     }
 }

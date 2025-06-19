@@ -132,7 +132,7 @@ pub fn on_register_user(
 
     info!("user registered: {name}");
 
-    ctx.push_account(account);
+    ctx.push_account(account)?;
 
     Ok(None)
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bRAC::proto::parse_rac_url;
 use clap::Parser;
 use log::info;
 
@@ -13,7 +14,7 @@ pub mod util;
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Args {
-    /// Server host
+    /// Server host (RAC URL)
     #[arg(short = 'H', long)]
     host: String,
 
@@ -53,10 +54,6 @@ pub struct Args {
     #[arg(long, default_value_t = 4194304)]
     messages_total_limit: usize,
 
-    /// Enable SSL (RACS)
-    #[arg(short = 'l', long)]
-    enable_ssl: bool,
-
     /// Set ssl certificate path (x509)
     #[arg(long)]
     ssl_key: Option<String>,
@@ -65,9 +62,9 @@ pub struct Args {
     #[arg(long)]
     ssl_cert: Option<String>,
 
-    /// Enable WRAC
+    /// Enable Proxy-Mode
     #[arg(short = 'w', long)]
-    enable_wrac: bool,
+    proxy_to: Option<String>,
 }
 
 fn main() {
@@ -83,5 +80,7 @@ fn main() {
 
     info!("Server started on {}", &args.host);
 
-    run_listener(context);
+    let (host, ssl, wrac) = parse_rac_url(&args.host).expect("INVALID RAC URL");
+
+    run_listener(context, &host, ssl, wrac);
 }
