@@ -73,16 +73,14 @@ pub fn on_chunked_data(
     client_has: u64,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     if let Some(url) = ctx.args.proxy_to.as_ref() {
-        return dbg!(
-            read_messages(
-                &mut connect(url, ctx.args.use_proxy.clone())?,
-                1024, // TODO: softcode this
-                client_has as usize,
-                true,
-            )?
-            .map(|o| (o.0.join("\n") + "\n").as_bytes().to_vec())
-            .ok_or("err on reading in proxy mode".into())
-        );
+        return read_messages(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            1024, // TODO: softcode this
+            client_has as usize,
+            true,
+        )?
+        .map(|o| (o.0.join("\n") + "\n").as_bytes().to_vec())
+        .ok_or("err on reading in proxy mode".into());
     }
 
     let messages = ctx.messages.read().unwrap().clone();
