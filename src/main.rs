@@ -62,9 +62,13 @@ pub struct Args {
     #[arg(long)]
     ssl_cert: Option<String>,
 
-    /// Enable Proxy-Mode
-    #[arg(short = 'w', long)]
+    /// Enable Proxy-Mode (RAC URL)
+    #[arg(short = 'P', long)]
     proxy_to: Option<String>,
+
+    /// Use Socks5 proxy (to connect to the server in proxy-mode)
+    #[arg(long)]
+    use_proxy: Option<String>,
 }
 
 fn main() {

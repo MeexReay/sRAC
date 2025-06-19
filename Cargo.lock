@@ -114,7 +114,7 @@ dependencies = [
 [[package]]
 name = "bRAC"
 version = "0.1.5+2.0"
-source = "git+https://github.com/MeexReay/bRAC.git#955da8a7b54e981f45d918b7d4e5d52c696d87d9"
+source = "git+https://github.com/MeexReay/bRAC?rev=5b23a3bd#5b23a3bd703954e655e1b465679698eca8ceefe6"
 dependencies = [
  "chrono",
  "clap",
