@@ -4,12 +4,24 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
+use bRAC::proto::{connect, read_messages, register_user, send_message, send_message_auth};
 use chrono::Local;
 use log::info;
 
 use crate::ctx::{Account, Context, add_message};
 
 pub fn on_total_size(ctx: Arc<Context>, _: SocketAddr) -> Result<u64, Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return read_messages(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            1024, // TODO: softcode this
+            0,
+            false,
+        )?
+        .map(|o| o.1 as u64)
+        .ok_or("err on reading in proxy mode".into()); // TODO: fix reading two times
+    }
+
     let messages_len = ctx.messages.read().unwrap().len() as u64;
     let offset = ctx.messages_offset.load(Ordering::SeqCst);
 
@@ -25,6 +37,17 @@ pub fn on_total_data(
     _: SocketAddr,
     _: Option<u64>, // sent_size
 ) -> Result<Vec<u8>, Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return read_messages(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            1024, // TODO: softcode this
+            0,
+            false,
+        )?
+        .map(|o| (o.0.join("\n") + "\n").as_bytes().to_vec())
+        .ok_or("err on reading in proxy mode".into()); // TODO: fix reading two times
+    }
+
     let mut messages = ctx.messages.read().unwrap().clone();
     let offset = ctx.messages_offset.load(Ordering::SeqCst);
 
@@ -49,6 +72,17 @@ pub fn on_chunked_data(
     _: Option<u64>, // sent_size
     client_has: u64,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return read_messages(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            1024, // TODO: softcode this
+            client_has as usize,
+            true,
+        )?
+        .map(|o| (o.0.join("\n") + "\n").as_bytes().to_vec())
+        .ok_or("err on reading in proxy mode".into());
+    }
+
     let messages = ctx.messages.read().unwrap().clone();
     let offset = ctx.messages_offset.load(Ordering::SeqCst);
     let client_has = if let Some(splash) = &ctx.args.splash {
@@ -70,6 +104,13 @@ pub fn on_send_message(
     addr: SocketAddr,
     message: Vec<u8>,
 ) -> Result<(), Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return send_message(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            &String::from_utf8_lossy(&message),
+        ); // TODO: make brac accept message in bytes
+    }
+
     if !ctx.args.auth_only {
         let mut message = message;
         message.truncate(ctx.args.message_limit);
@@ -86,13 +127,26 @@ pub fn on_send_auth_message(
     password: &str,
     text: &str,
 ) -> Result<Option<u8>, Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return match send_message_auth(
+            &mut connect(url, ctx.args.use_proxy.clone())?,
+            name,
+            password,
+            text,
+        ) {
+            Ok(0) => Ok(None),
+            Ok(n) => Ok(Some(n)),
+            Err(err) => Err(err),
+        };
+    }
+
     if let Some(acc) = ctx.get_account(name) {
         if acc.check_password(password) {
             let mut name = name.to_string();
-            name.truncate(256); // FIXME: softcode this
+            name.truncate(256); // TODO: softcode this
 
             let mut password = password.to_string();
-            password.truncate(256); // FIXME: softcode this
+            password.truncate(256); // TODO: softcode this
 
             let mut text = text.to_string();
             text.truncate(ctx.args.message_limit);
@@ -114,6 +168,19 @@ pub fn on_register_user(
     name: &str,
     password: &str,
 ) -> Result<Option<u8>, Box<dyn Error>> {
+    if let Some(url) = ctx.args.proxy_to.as_ref() {
+        return Ok(
+            match register_user(
+                &mut connect(url, ctx.args.use_proxy.clone())?,
+                name,
+                password,
+            ) {
+                Ok(true) => None,
+                _ => Some(0x01),
+            },
+        );
+    }
+
     let addr = addr.ip().to_string();
 
     let now: i64 = Local::now().timestamp_millis();

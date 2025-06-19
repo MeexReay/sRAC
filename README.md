@@ -21,11 +21,11 @@ cargo run -- -H rac://127.0.0.1:42666
 
 ## roadmap
 
-- [ ] Proxy-mode
-- [ ] Notifications by ip
-- [ ] Server commands
 - [x] WRAC protocol
 - [x] RACS protocol
+- [x] Proxy-mode
+- [ ] Notifications by ip (private messages)
+- [ ] Server commands
 
 ## license
 
