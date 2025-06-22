@@ -105,6 +105,15 @@ pub fn accept_wrac_stream(
                     websocket.write(Message::Binary(Bytes::from(vec![resp_id])))?;
                     websocket.flush()?;
                 }
+            } else if id == 0x69 {
+                let (protocol_version, name) = on_server_info(ctx.clone(), addr)?;
+
+                let mut data = Vec::new();
+                data.push(protocol_version);
+                data.append(&mut name.as_bytes().to_vec());
+
+                websocket.write(Message::Binary(Bytes::from(data)))?;
+                websocket.flush()?;
             }
         }
     }
