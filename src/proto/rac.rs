@@ -44,7 +44,7 @@ pub fn accept_rac_stream(
 
         on_send_message(ctx.clone(), addr, buf)?;
     } else if buf[0] == 0x02 {
-        let mut buf = vec![0; ctx.args.message_limit + 2 + 512]; // FIXME: softcode this (512 = name + password)
+        let mut buf = vec![0; ctx.args.message_limit + 2 + 512]; // TODO: softcode this (512 = name + password)
         let size = stream.read(&mut buf)?;
         buf.truncate(size);
 
@@ -84,6 +84,14 @@ pub fn accept_rac_stream(
         if let Some(resp_id) = on_register_user(ctx.clone(), addr, name, password)? {
             stream.write_all(&[resp_id])?;
         }
+    } else if buf[0] == 0x69 {
+        let (protocol_version, name) = on_server_info(ctx.clone(), addr)?;
+
+        let mut data = Vec::new();
+        data.push(protocol_version);
+        data.append(&mut name.as_bytes().to_vec());
+
+        stream.write_all(&data)?;
     }
 
     Ok(())

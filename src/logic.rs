@@ -35,7 +35,7 @@ pub fn on_total_size(ctx: Arc<Context>, _: SocketAddr) -> Result<u64, Box<dyn Er
 pub fn on_total_data(
     ctx: Arc<Context>,
     _: SocketAddr,
-    _: Option<u64>, // sent_size
+    _sent_size: Option<u64>,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     if let Some(url) = ctx.args.proxy_to.as_ref() {
         return read_messages(
@@ -69,7 +69,7 @@ pub fn on_total_data(
 pub fn on_chunked_data(
     ctx: Arc<Context>,
     _: SocketAddr,
-    _: Option<u64>, // sent_size
+    _sent_size: Option<u64>,
     client_has: u64,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     if let Some(url) = ctx.args.proxy_to.as_ref() {
@@ -202,4 +202,8 @@ pub fn on_register_user(
     ctx.push_account(account)?;
 
     Ok(None)
+}
+
+pub fn on_server_info(_: Arc<Context>, _: SocketAddr) -> Result<(u8, String), Box<dyn Error>> {
+    Ok((0x03, format!("sRAC {}", env!("CARGO_PKG_VERSION"))))
 }
