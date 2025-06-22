@@ -151,7 +151,7 @@ pub fn on_send_auth_message(
             let mut text = text.to_string();
             text.truncate(ctx.args.message_limit);
 
-            add_message(text.as_bytes(), ctx, None)?;
+            add_message(format!("<{name}> {text}").as_bytes(), ctx, None)?;
 
             Ok(None)
         } else {
