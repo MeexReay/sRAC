@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use bRAC::proto::parse_rac_url;
 use clap::Parser;
 use log::info;
 
-use crate::{ctx::Context, proto::run_listener};
+use crate::{ctx::Context, proto::run_listener, util::parse_rac_url};
 
 pub mod ctx;
 pub mod logic;
@@ -63,10 +62,12 @@ pub struct Args {
     ssl_cert: Option<String>,
 
     /// Enable Proxy-Mode (RAC URL)
+    #[cfg(feature = "proxy-mode")]
     #[arg(short = 'P', long)]
     proxy_to: Option<String>,
 
     /// Use Socks5 proxy (to connect to the server in proxy-mode)
+    #[cfg(feature = "proxy-mode")]
     #[arg(long)]
     use_proxy: Option<String>,
 }

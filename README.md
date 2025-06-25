@@ -19,6 +19,15 @@ git clone https://github.com/MeexReay/sRAC.git; cd sRAC
 cargo run -- -H rac://127.0.0.1:42666
 ```
 
+### without proxy-mode
+
+proxy-mode brings with it very massive bRAC code, so it would be great to not compile it
+
+```bash
+git clone https://github.com/MeexReay/sRAC.git; cd sRAC
+cargo run --no-default-features -- -H rac://127.0.0.1:42666
+```
+
 ## roadmap
 
 - [x] WRAC protocol

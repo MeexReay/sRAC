@@ -4,14 +4,16 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use bRAC::proto::{connect, read_messages, register_user, send_message, send_message_auth};
 use chrono::Local;
 use log::info;
 
 use crate::ctx::{Account, Context, add_message};
 
 pub fn on_total_size(ctx: Arc<Context>, _: SocketAddr) -> Result<u64, Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, read_messages};
+
         return read_messages(
             &mut connect(url, ctx.args.use_proxy.clone())?,
             1024, // TODO: softcode this
@@ -37,7 +39,10 @@ pub fn on_total_data(
     _: SocketAddr,
     _sent_size: Option<u64>,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, read_messages};
+
         return read_messages(
             &mut connect(url, ctx.args.use_proxy.clone())?,
             1024, // TODO: softcode this
@@ -72,7 +77,10 @@ pub fn on_chunked_data(
     _sent_size: Option<u64>,
     client_has: u64,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, read_messages};
+
         return read_messages(
             &mut connect(url, ctx.args.use_proxy.clone())?,
             1024, // TODO: softcode this
@@ -104,7 +112,10 @@ pub fn on_send_message(
     addr: SocketAddr,
     message: Vec<u8>,
 ) -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, send_message};
+
         return send_message(
             &mut connect(url, ctx.args.use_proxy.clone())?,
             &String::from_utf8_lossy(&message),
@@ -127,7 +138,10 @@ pub fn on_send_auth_message(
     password: &str,
     text: &str,
 ) -> Result<Option<u8>, Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, send_message_auth};
+
         return match send_message_auth(
             &mut connect(url, ctx.args.use_proxy.clone())?,
             name,
@@ -168,7 +182,10 @@ pub fn on_register_user(
     name: &str,
     password: &str,
 ) -> Result<Option<u8>, Box<dyn Error>> {
+    #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
+        use bRAC::proto::{connect, register_user};
+
         return Ok(
             match register_user(
                 &mut connect(url, ctx.args.use_proxy.clone())?,
