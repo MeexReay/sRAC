@@ -114,3 +114,48 @@ where
     cursor.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(|e| e.into())
 }
+
+// TODO: rewrite this bezobrazie
+pub fn parse_rac_url(url: &str) -> Option<(String, bool, bool)> {
+    let (scheme, url) = url.split_once("://").unwrap_or(("rac", url));
+    let (host, _) = url.split_once("/").unwrap_or((url, ""));
+    match scheme.to_lowercase().as_str() {
+        "rac" => Some((
+            if host.contains(":") {
+                host.to_string()
+            } else {
+                format!("{host}:42666")
+            },
+            false,
+            false,
+        )),
+        "racs" => Some((
+            if host.contains(":") {
+                host.to_string()
+            } else {
+                format!("{host}:42667")
+            },
+            true,
+            false,
+        )),
+        "wrac" => Some((
+            if host.contains(":") {
+                host.to_string()
+            } else {
+                format!("{host}:52666")
+            },
+            false,
+            true,
+        )),
+        "wracs" => Some((
+            if host.contains(":") {
+                host.to_string()
+            } else {
+                format!("{host}:52667")
+            },
+            true,
+            true,
+        )),
+        _ => None,
+    }
+}

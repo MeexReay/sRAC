@@ -20,3 +20,8 @@ lazy_static = "1.5.0"
 git = "https://github.com/MeexReay/bRAC"
 rev = "f3b6cbd01c5443e03d012c3c866487ba19785baf"
 default-features = false
+optional = true
+
+[features]
+default = ["proxy-mode"]
+proxy-mode = ["dep:bRAC"]
