@@ -15,6 +15,7 @@ lazy_static! {
   ];
   pub static ref ANSI_REGEX: Regex = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
   pub static ref CONTROL_CHARS_REGEX: Regex = Regex::new(r"[\x00-\x1F\x7F]").unwrap();
+    pub static ref AVATAR_REGEX: Regex = Regex::new(r"(.*)\x06!!AR!!(.*)").unwrap();
 }
 
 pub fn sanitize_text(input: &str) -> String {
@@ -113,6 +114,17 @@ where
     let mut buf = vec![0; len];
     cursor.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(|e| e.into())
+}
+
+pub fn grab_avatar(message: &str) -> (String, Option<String>) {
+    if let Some(message) = AVATAR_REGEX.captures(&message) {
+        (
+            message.get(1).unwrap().as_str().to_string(),
+            Some(message.get(2).unwrap().as_str().to_string()),
+        )
+    } else {
+        (message.to_string(), None)
+    }
 }
 
 // TODO: rewrite this bezobrazie
