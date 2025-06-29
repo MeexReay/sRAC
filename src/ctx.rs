@@ -18,7 +18,7 @@ use rand::{Rng, distr::Alphanumeric};
 
 use crate::{
     Args,
-    util::{format_message, read_string, read_u32, sanitize_text},
+    util::{format_message, grab_avatar, read_string, read_u32, sanitize_text},
 };
 
 fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
@@ -263,11 +263,11 @@ pub fn add_message(
     let mut msg = prefix.as_bytes().to_vec();
 
     if ctx.args.sanitize {
-        msg.append(
-            &mut sanitize_text(&String::from_utf8_lossy(text))
-                .as_bytes()
-                .to_vec(),
-        );
+        let (text, avatar) = grab_avatar(&String::from_utf8_lossy(text));
+        msg.append(&mut sanitize_text(&text).as_bytes().to_vec());
+        if let Some(avatar) = avatar {
+            msg.append(&mut format!("\x06!!AR!!{avatar}").as_bytes().to_vec());
+        }
     } else {
         msg.append(&mut text.to_vec());
     }
