@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, thread};
 
 use clap::Parser;
 use log::info;
@@ -13,9 +13,9 @@ pub mod util;
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Args {
-    /// Server host (RAC URL)
-    #[arg(short = 'H', long)]
-    host: String,
+    /// Server hosts separated with space (RAC URL)
+    #[arg(short = 'H', long, value_delimiter = ' ', num_args = 1..)]
+    hosts: Option<Vec<String>>,
 
     /// Sanitize messages
     #[arg(short, long)]
@@ -53,11 +53,11 @@ pub struct Args {
     #[arg(long, default_value_t = 4194304)]
     messages_total_limit: usize,
 
-    /// Set ssl certificate path (x509)
+    /// Set ssl key path (x509)
     #[arg(long)]
     ssl_key: Option<String>,
 
-    /// Set ssl key path (x509)
+    /// Set ssl certificate path (x509)
     #[arg(long)]
     ssl_cert: Option<String>,
 
@@ -83,9 +83,26 @@ fn main() {
         args.accounts_file.clone(),
     ));
 
-    info!("Server started on {}", &args.host);
+    let hosts = args.hosts.clone().unwrap_or_default();
 
-    let (host, ssl, wrac) = parse_rac_url(&args.host).expect("INVALID RAC URL");
+    let mut size = hosts.len();
 
-    run_listener(context, &host, ssl, wrac);
+    for host in hosts {
+        let context = context.clone();
+        
+        let (host, ssl, wrac) = parse_rac_url(&host).expect("INVALID RAC URL");
+        
+        info!("Server started on {} ({}, {})", &host,
+            if wrac { "websocket-based" } else { "normal" },
+            if ssl { "encrypted" } else { "unencrypted" },
+        );
+
+        if size == 1 {
+            run_listener(context, &host, ssl, wrac);
+        } else {
+            thread::spawn(move || run_listener(context, &host, ssl, wrac));
+        }
+
+        size -= 1;
+    }
 }
