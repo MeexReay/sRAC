@@ -13,7 +13,13 @@ simple server for RAC
 - register and message timeouts
 - multiple listeners on one server
 
-## examples of usage
+## usage
+
+```
+cargo run -- --help
+```
+
+## examples
 
 ### normal rac server
 
