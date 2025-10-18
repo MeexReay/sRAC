@@ -55,6 +55,17 @@ cargo run -- \
   --ssl-key server.key --ssl-cert server.crt
 ```
 
+### proxy-mode
+
+proxy that redirects data from rac://127.0.0.1 and wrac://127.0.0.1 to wracs://127.0.0.1. keep in mind that target server will only see proxy's ip
+
+```bash
+cargo run -- \
+  -H rac://127.0.0.1 \
+  -H wrac://127.0.0.1 \
+  -P wracs://127.0.0.1
+```
+
 ### disabled proxy-mode
 
 proxy-mode brings with it very massive bRAC code (without GUI part, but anyway), so it would be great to not compile it
