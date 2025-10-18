@@ -12,6 +12,7 @@ simple server for RAC
 - messages saving into file
 - register and message timeouts
 - multiple listeners on one server
+- proxy-mode
 
 ## usage
 
