@@ -86,7 +86,7 @@ cargo run --no-default-features -- -H rac://127.0.0.1:42666
 - [x] WRAC protocol
 - [x] RACS protocol
 - [x] Proxy-mode
-- [ ] Notifications by ip (private messages)
+- [ ] Private messages
 - [ ] Server commands
 
 ## license

@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use tungstenite::{Bytes, Message, accept};
+use tungstenite::{accept, Bytes, Message};
 
 use crate::{ctx::Context, logic::*};
 

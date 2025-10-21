@@ -3,7 +3,7 @@ use std::{
     error::Error,
     fs::{self, OpenOptions},
     io::{Cursor, Read, Write},
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         Arc, RwLock,
         atomic::{AtomicU64, Ordering},
@@ -20,6 +20,19 @@ use crate::{
     Args,
     util::{format_message, grab_avatar, read_string, read_u32, sanitize_text},
 };
+
+pub trait AddrToU64 {
+    fn to_u64(self) -> u64;
+}
+
+impl AddrToU64 for SocketAddr {
+    fn to_u64(self) -> u64 {
+        match self.ip() {
+            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) as u64,
+            IpAddr::V6(addr) => u128::from_be_bytes(addr.octets()) as u64,
+        }
+    }
+}
 
 fn load_accounts(accounts_file: Option<String>) -> Vec<Account> {
     if let Some(accounts_file) = accounts_file.clone() {
@@ -56,9 +69,21 @@ pub struct Context {
     pub accounts_file: Option<String>,
     pub messages: RwLock<Vec<u8>>,
     pub accounts: RwLock<Vec<Account>>,
+
+    /// size of bytes that were removed from messages
     pub messages_offset: AtomicU64,
-    pub notifications: RwLock<HashMap<u32, Vec<u8>>>, // u32 - ip
-    pub timeouts: RwLock<HashMap<u32, Duration>>,
+
+    /// vector of (ip, pos, text)
+    ///
+    /// ip is u32
+    /// pos is usize: 0 ..= messages_offset + messages.len() + splash.len()
+    /// text is byte vector
+    ///  
+    /// notification should disappear when its pos is less than messages_offset
+    ///
+    /// must be sorted by ascending pos
+    pub notifications: RwLock<Vec<(u64, u64, Vec<u8>)>>,
+    pub timeouts: RwLock<HashMap<u64, Duration>>,
 }
 
 impl Context {
@@ -74,9 +99,37 @@ impl Context {
             messages: RwLock::new(load_messages(messages_file)),
             accounts: RwLock::new(load_accounts(accounts_file)),
             messages_offset: AtomicU64::default(),
-            notifications: RwLock::new(HashMap::new()),
+            notifications: RwLock::new(Vec::new()),
             timeouts: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn get_total_messages(&self, addr: Option<u64>) -> u64 {
+        let mut total_messages = self.messages.read().unwrap().len() as u64;
+
+        let offset = self.messages_offset.load(Ordering::SeqCst);
+        total_messages += offset;
+
+        if let Some(splash) = &self.args.splash {
+            total_messages += splash.len() as u64
+        }
+
+        if let Some(addr) = addr {
+            for (x, _, text) in self.notifications.read().unwrap().iter() {
+                if *x == addr {
+                    total_messages += text.len() as u64;
+                }
+            }
+        }
+
+        total_messages
+    }
+
+    pub fn push_notification(&self, addr: u64, msg: Vec<u8>) {
+        self.notifications
+            .write()
+            .unwrap()
+            .push((addr, self.get_total_messages(None), msg));
     }
 
     pub fn push_message(&self, msg: Vec<u8>) -> Result<(), Box<dyn Error>> {

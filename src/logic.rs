@@ -7,9 +7,9 @@ use std::{
 use chrono::Local;
 use log::info;
 
-use crate::ctx::{Account, Context, add_message};
+use crate::ctx::{Account, AddrToU64, Context, add_message};
 
-pub fn on_total_size(ctx: Arc<Context>, _: SocketAddr) -> Result<u64, Box<dyn Error>> {
+pub fn on_total_size(ctx: Arc<Context>, addr: SocketAddr) -> Result<u64, Box<dyn Error>> {
     #[cfg(feature = "proxy-mode")]
     if let Some(url) = ctx.args.proxy_to.as_ref() {
         use bRAC::proto::{connect, read_messages};
@@ -24,19 +24,12 @@ pub fn on_total_size(ctx: Arc<Context>, _: SocketAddr) -> Result<u64, Box<dyn Er
         .ok_or("err on reading in proxy mode".into()); // TODO: fix reading two times
     }
 
-    let messages_len = ctx.messages.read().unwrap().len() as u64;
-    let offset = ctx.messages_offset.load(Ordering::SeqCst);
-
-    if let Some(splash) = &ctx.args.splash {
-        Ok(messages_len + splash.len() as u64 + offset)
-    } else {
-        Ok(messages_len + offset)
-    }
+    Ok(ctx.get_total_messages(Some(addr.to_u64())))
 }
 
 pub fn on_total_data(
     ctx: Arc<Context>,
-    _: SocketAddr,
+    addr: SocketAddr,
     _sent_size: Option<u64>,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     #[cfg(feature = "proxy-mode")]
@@ -68,12 +61,25 @@ pub fn on_total_data(
         messages.append(&mut splash.clone().as_bytes().to_vec());
     }
 
+    let addr = addr.to_u64();
+
+    let mut pos_offset = 0;
+
+    for (x, pos, text) in ctx.notifications.read().unwrap().iter() {
+        if *x == addr {
+            // as usize: scary!
+            let index = (pos + pos_offset) as usize;
+            messages.splice(index..index, text.clone());
+            pos_offset += pos;
+        }
+    }
+
     Ok(messages)
 }
 
 pub fn on_chunked_data(
     ctx: Arc<Context>,
-    _: SocketAddr,
+    addr: SocketAddr,
     _sent_size: Option<u64>,
     client_has: u64,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -91,8 +97,39 @@ pub fn on_chunked_data(
         .ok_or("err on reading in proxy mode".into());
     }
 
-    let messages = ctx.messages.read().unwrap().clone();
+    let mut messages = ctx.messages.read().unwrap().clone();
     let offset = ctx.messages_offset.load(Ordering::SeqCst);
+
+    let addr = addr.to_u64();
+
+    let mut pos_offset = 0;
+
+    for (x, pos, text) in ctx.notifications.read().unwrap().iter() {
+        if *x == addr {
+            let mut index = pos + pos_offset;
+
+            if index < offset {
+                continue;
+            }
+            index -= offset;
+
+            if let Some(splash) = &ctx.args.splash {
+                let splash_len = splash.len() as u64;
+
+                if index < splash_len {
+                    continue;
+                }
+                index -= splash_len
+            }
+
+            // as usize: scary!
+            let index = index as usize;
+
+            messages.splice(index..index, text.clone());
+            pos_offset += pos;
+        }
+    }
+
     let client_has = if let Some(splash) = &ctx.args.splash {
         client_has - splash.len() as u64
     } else {
@@ -100,9 +137,17 @@ pub fn on_chunked_data(
     };
 
     if client_has <= offset {
+        // that means client has only cleared messages
+        // or he just has 0 messages
+        // anyway, he needs all of the messages
+
         Ok(messages)
     } else {
         let client_has = (client_has - offset) as usize;
+
+        // count size of messages without offset (cleared ones)
+        // and send all the remaining messages for him
+
         Ok(messages[client_has..].to_vec())
     }
 }
@@ -122,6 +167,15 @@ pub fn on_send_message(
         ); // TODO: make brac accept message in bytes
     }
 
+    if on_server_command(
+        ctx.clone(),
+        addr,
+        None,
+        String::from_utf8_lossy(&message).to_string(),
+    )? {
+        return Ok(());
+    }
+
     if !ctx.args.auth_only {
         let mut message = message;
         message.truncate(ctx.args.message_limit);
@@ -133,7 +187,7 @@ pub fn on_send_message(
 
 pub fn on_send_auth_message(
     ctx: Arc<Context>,
-    _: SocketAddr,
+    addr: SocketAddr,
     name: &str,
     password: &str,
     text: &str,
@@ -156,6 +210,10 @@ pub fn on_send_auth_message(
 
     if let Some(acc) = ctx.get_account(name) {
         if acc.check_password(password) {
+            if on_server_command(ctx.clone(), addr, Some(name.to_string()), text.to_string())? {
+                return Ok(None);
+            }
+
             let mut name = name.to_string();
             name.truncate(256); // TODO: softcode this
 
@@ -223,4 +281,30 @@ pub fn on_register_user(
 
 pub fn on_server_info(_: Arc<Context>, _: SocketAddr) -> Result<(u8, String), Box<dyn Error>> {
     Ok((0x03, format!("sRAC {}", env!("CARGO_PKG_VERSION"))))
+}
+
+/// return true on valid command (even unknown)
+pub fn on_server_command(
+    ctx: Arc<Context>,
+    addr: SocketAddr,
+    _auth: Option<String>,
+    command: String,
+) -> Result<bool, Box<dyn Error>> {
+    if command.starts_with("?") {
+        let mut split = command.split(" ");
+        let command = match split.next() {
+            Some(o) => &o[1..],
+            None => return Ok(false),
+        };
+        let _args = split.collect::<Vec<&str>>();
+
+        match command {
+            "ping" => {
+                ctx.push_notification(addr.to_u64(), "Pong!".as_bytes().to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(false)
 }

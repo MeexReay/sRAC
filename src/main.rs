@@ -13,9 +13,9 @@ pub mod util;
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Args {
-    /// Server hosts separated with space (RAC URL)
+    /// Server hosts separated with spaces (RAC URL)
     #[arg(short = 'H', long, value_delimiter = ' ', num_args = 1..)]
-    hosts: Option<Vec<String>>,
+    hosts: Vec<String>,
 
     /// Sanitize messages
     #[arg(short, long)]
@@ -83,16 +83,16 @@ fn main() {
         args.accounts_file.clone(),
     ));
 
-    let hosts = args.hosts.clone().unwrap_or_default();
+    let mut size = args.hosts.len();
 
-    let mut size = hosts.len();
-
-    for host in hosts {
+    for host in args.hosts.clone() {
         let context = context.clone();
-        
+
         let (host, ssl, wrac) = parse_rac_url(&host).expect("INVALID RAC URL");
-        
-        info!("Server started on {} ({}, {})", &host,
+
+        info!(
+            "Server started on {} ({}, {})",
+            &host,
             if wrac { "websocket-based" } else { "normal" },
             if ssl { "encrypted" } else { "unencrypted" },
         );
