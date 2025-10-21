@@ -7,7 +7,10 @@ use std::{
 use chrono::Local;
 use log::info;
 
-use crate::ctx::{Account, AddrToU64, Context, add_message};
+use crate::{
+    ctx::{Account, AddrToU64, Context, add_message},
+    util::find_username_color,
+};
 
 pub fn on_total_size(ctx: Arc<Context>, addr: SocketAddr) -> Result<u64, Box<dyn Error>> {
     #[cfg(feature = "proxy-mode")]
@@ -167,13 +170,10 @@ pub fn on_send_message(
         ); // TODO: make brac accept message in bytes
     }
 
-    if on_server_command(
-        ctx.clone(),
-        addr,
-        None,
-        String::from_utf8_lossy(&message).to_string(),
-    )? {
-        return Ok(());
+    if let Some((name, text, _)) = find_username_color(&String::from_utf8_lossy(&message)) {
+        if on_server_command(ctx.clone(), addr, name, text)? {
+            return Ok(());
+        }
     }
 
     if !ctx.args.auth_only {
@@ -210,7 +210,7 @@ pub fn on_send_auth_message(
 
     if let Some(acc) = ctx.get_account(name) {
         if acc.check_password(password) {
-            if on_server_command(ctx.clone(), addr, Some(name.to_string()), text.to_string())? {
+            if on_server_command(ctx.clone(), addr, name.to_string(), text.to_string())? {
                 return Ok(None);
             }
 
@@ -287,11 +287,13 @@ pub fn on_server_info(_: Arc<Context>, _: SocketAddr) -> Result<(u8, String), Bo
 pub fn on_server_command(
     ctx: Arc<Context>,
     addr: SocketAddr,
-    _auth: Option<String>,
-    command: String,
+    _name: String,
+    text: String,
 ) -> Result<bool, Box<dyn Error>> {
-    if command.starts_with("?") {
-        let mut split = command.split(" ");
+    let text = text.trim();
+
+    if text.starts_with("?") {
+        let mut split = text.split(" ");
         let command = match split.next() {
             Some(o) => &o[1..],
             None => return Ok(false),
@@ -300,7 +302,7 @@ pub fn on_server_command(
 
         match command {
             "ping" => {
-                ctx.push_notification(addr.to_u64(), "Pong!".as_bytes().to_vec());
+                ctx.push_notification(addr.to_u64(), "Pong!\n".as_bytes().to_vec());
             }
             _ => {}
         }

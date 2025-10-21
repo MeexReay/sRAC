@@ -15,7 +15,7 @@ lazy_static! {
   ];
   pub static ref ANSI_REGEX: Regex = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
   pub static ref CONTROL_CHARS_REGEX: Regex = Regex::new(r"[\x00-\x1F\x7F]").unwrap();
-    pub static ref AVATAR_REGEX: Regex = Regex::new(r"(.*)\x06!!AR!!(.*)").unwrap();
+  pub static ref AVATAR_REGEX: Regex = Regex::new(r"(.*)\x06!!AR!!(.*)").unwrap();
 }
 
 pub fn sanitize_text(input: &str) -> String {
