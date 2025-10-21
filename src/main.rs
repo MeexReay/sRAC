@@ -1,7 +1,7 @@
 use std::{sync::Arc, thread};
 
 use clap::Parser;
-use log::info;
+use log::{info, warn};
 
 use crate::{ctx::Context, proto::run_listener, util::parse_rac_url};
 
@@ -84,6 +84,10 @@ fn main() {
     ));
 
     let mut size = args.hosts.len();
+
+    if size == 0 {
+        warn!("Provide at least one host with --hosts (-H) arg");
+    }
 
     for host in args.hosts.clone() {
         let context = context.clone();
